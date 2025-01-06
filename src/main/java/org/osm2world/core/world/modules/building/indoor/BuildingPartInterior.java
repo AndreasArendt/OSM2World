@@ -5,9 +5,8 @@ import java.util.Collection;
 import java.util.List;
 
 import org.osm2world.core.map_data.data.MapElement;
-import org.osm2world.core.target.Renderable;
-import org.osm2world.core.target.Target;
 import org.osm2world.core.world.attachment.AttachmentSurface;
+import org.osm2world.core.world.data.ProceduralWorldObject;
 import org.osm2world.core.world.modules.building.BuildingPart;
 
 /**
@@ -15,12 +14,11 @@ import org.osm2world.core.world.modules.building.BuildingPart;
  * This could be merged into {@link BuildingPart}, but is kept separate for now
  * as it might be helpful to eventually allow interiors spanning entire buildings.
  */
-public class BuildingPartInterior implements Renderable {
+public class BuildingPartInterior {
 
 	private final List<IndoorWall> walls = new ArrayList<>();
 	private final List<IndoorRoom> rooms = new ArrayList<>();
 	private final List<IndoorArea> areas = new ArrayList<>();
-	private final List<Corridor> corridors = new ArrayList<>();
 
 	private List<AttachmentSurface> surfaces = null;
 
@@ -28,30 +26,12 @@ public class BuildingPartInterior implements Renderable {
 
 		for (MapElement element : elements) {
 
-			IndoorObjectData data = new IndoorObjectData(buildingPart, element);
+			var data = new IndoorObjectData(buildingPart, element);
 
 			switch (element.getTags().getValue("indoor")) {
-
-			case "wall":
-
-				walls.add(new IndoorWall(data));
-				break;
-
-			case "room":
-
-				rooms.add(new IndoorRoom(data));
-				break;
-
-			case "area":
-
-				areas.add(new IndoorArea(data));
-				break;
-
-			case "corridor":
-
-				corridors.add(new Corridor(data));
-				break;
-
+			case "wall" -> walls.add(new IndoorWall(data));
+			case "room", "corridor" -> rooms.add(new IndoorRoom(data));
+			case "area" -> areas.add(new IndoorArea(data));
 			}
 
 		}
@@ -72,32 +52,21 @@ public class BuildingPartInterior implements Renderable {
 				surfaces.addAll(area.getAttachmentSurfaces());
 			}
 
-			for (Corridor corridor : corridors) {
-				surfaces.addAll(corridor.getAttachmentSurfaces());
-			}
-
-			for (IndoorWall wall : walls) {
-				surfaces.addAll(wall.getAttachmentSurfaces());
-			}
-
 		}
 
 		return surfaces;
 
 	}
 
-	@Override
-	public void renderTo(Target target) {
+	public void buildMeshesAndModels(ProceduralWorldObject.Target target) {
 
 		IndoorWall.allRenderedWallSegments = new ArrayList<>(); //FIXME this is not thread-safe!
 
 		walls.forEach(w -> w.renderTo(target));
 
-		rooms.forEach(r -> r.renderTo(target));
+		rooms.forEach(r -> r.buildMeshesAndModels(target));
 
-		areas.forEach(a -> a.renderTo(target));
-
-		corridors.forEach(c -> c.renderTo(target));
+		areas.forEach(a -> a.buildMeshesAndModels(target));
 
 	}
 }

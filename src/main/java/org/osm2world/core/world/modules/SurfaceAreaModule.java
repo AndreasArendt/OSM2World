@@ -2,7 +2,8 @@ package org.osm2world.core.world.modules;
 
 import static org.osm2world.core.map_data.creation.EmptyTerrainBuilder.EMPTY_SURFACE_VALUE;
 import static org.osm2world.core.map_elevation.creation.EleConstraintEnforcer.ConstraintType.MIN;
-import static org.osm2world.core.map_elevation.data.GroundState.*;
+import static org.osm2world.core.map_elevation.data.GroundState.ABOVE;
+import static org.osm2world.core.map_elevation.data.GroundState.BELOW;
 import static org.osm2world.core.target.common.texcoord.NamedTexCoordFunction.GLOBAL_X_Z;
 import static org.osm2world.core.target.common.texcoord.TexCoordUtil.triangleTexCoordLists;
 
@@ -22,13 +23,11 @@ import org.osm2world.core.math.VectorGridXZ;
 import org.osm2world.core.math.VectorXZ;
 import org.osm2world.core.math.algorithms.TriangulationUtil;
 import org.osm2world.core.math.shapes.PolygonShapeXZ;
-import org.osm2world.core.target.Target;
 import org.osm2world.core.target.common.material.Material;
 import org.osm2world.core.target.common.material.Materials;
+import org.osm2world.core.util.FaultTolerantIterationUtil;
 import org.osm2world.core.world.data.AbstractAreaWorldObject;
-import org.osm2world.core.world.data.LegacyWorldObject;
-import org.osm2world.core.world.data.TerrainBoundaryWorldObject;
-import org.osm2world.core.world.data.WorldObject;
+import org.osm2world.core.world.data.ProceduralWorldObject;
 import org.osm2world.core.world.modules.common.AbstractModule;
 
 /**
@@ -83,7 +82,7 @@ public class SurfaceAreaModule extends AbstractModule {
 	}
 
 	public static class SurfaceArea extends AbstractAreaWorldObject
-			implements TerrainBoundaryWorldObject, LegacyWorldObject {
+			implements ProceduralWorldObject {
 
 		private final String surface;
 
@@ -95,7 +94,7 @@ public class SurfaceAreaModule extends AbstractModule {
 		}
 
 		@Override
-		public void renderTo(Target target) {
+		public void buildMeshesAndModels(Target target) {
 
 			Material material;
 
@@ -132,56 +131,16 @@ public class SurfaceAreaModule extends AbstractModule {
 
 			Collection<PolygonShapeXZ> footprint = getGroundFootprint();
 
-			/* collect the outlines of overlapping polygons,
-			 * and EleConnectors within the area */
-
-			List<PolygonShapeXZ> allPolys = new ArrayList<>();
-			List<VectorXZ> eleConnectorPoints = new ArrayList<>();
-
-			if (this.getGroundState() == ON) {
-
-				for (MapOverlap<?, ?> overlap : area.getOverlaps()) {
-					for (WorldObject otherWO : overlap.getOther(area).getRepresentations()) {
-
-						for (EleConnector eleConnector : otherWO.getEleConnectors()) {
-
-							if (eleConnector.reference == null) {
-								/* workaround to avoid using connectors at intersections,
-								 * which might fall on area segments
-								 * //TODO cleaner solution
-								 */
-								continue;
-							}
-
-							if (footprint.stream().anyMatch(p -> p.contains(eleConnector.pos))) {
-								eleConnectorPoints.add(eleConnector.pos);
-							}
-						}
-
-						if (otherWO.getOutlinePolygonXZ() != null) {
-							allPolys.add(otherWO.getOutlinePolygonXZ());
-						}
-
-					}
-				}
-
-			}
-
 			/* add a grid of points within the area for smoother surface shapes */
+
+			List<VectorXZ> eleConnectorPoints = new ArrayList<>();
 
 			VectorGridXZ pointGrid = new VectorGridXZ(
 					area.boundingBox(),
 					EmptyTerrainBuilder.POINT_GRID_DIST);
 
 			for (VectorXZ point : pointGrid) {
-
-				//don't insert if it is e.g. on top of a tunnel;
-				//otherwise there would be no minimum vertical distance
-
-				if (allPolys.stream().noneMatch(it -> it.contains(point))) {
-					eleConnectorPoints.add(point);
-				}
-
+				eleConnectorPoints.add(point);
 			}
 
 			/* triangulate, using elevation information from all participants */
@@ -200,7 +159,7 @@ public class SurfaceAreaModule extends AbstractModule {
 			/* add vertical distance to connectors above and below */
 
 			for (MapOverlap<?, ?> overlap : area.getOverlaps()) {
-			for (WorldObject otherWO : overlap.getOther(area).getRepresentations()) {
+			FaultTolerantIterationUtil.forEach(overlap.getOther(area).getRepresentations(),  otherWO -> {
 
 				for (EleConnector eleConnector : otherWO.getEleConnectors()) {
 
@@ -224,7 +183,7 @@ public class SurfaceAreaModule extends AbstractModule {
 
 				}
 
-			}
+			});
 			}
 
 		}
@@ -238,6 +197,11 @@ public class SurfaceAreaModule extends AbstractModule {
 			} else {
 				return super.getGroundState();
 			}
+		}
+
+		@Override
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
+			return List.of(getOutlinePolygonXZ());
 		}
 
 		@Override

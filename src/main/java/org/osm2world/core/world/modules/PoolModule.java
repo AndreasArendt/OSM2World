@@ -13,6 +13,7 @@ import static org.osm2world.core.world.modules.common.WorldModuleParseUtil.parse
 
 import java.awt.*;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 import org.osm2world.core.map_data.data.MapArea;
@@ -25,15 +26,14 @@ import org.osm2world.core.math.TriangleXYZ;
 import org.osm2world.core.math.VectorXYZ;
 import org.osm2world.core.math.VectorXZ;
 import org.osm2world.core.math.shapes.CircleXZ;
+import org.osm2world.core.math.shapes.PolygonShapeXZ;
 import org.osm2world.core.math.shapes.PolylineXZ;
 import org.osm2world.core.math.shapes.ShapeXZ;
-import org.osm2world.core.target.Target;
 import org.osm2world.core.target.common.material.ImmutableMaterial;
 import org.osm2world.core.target.common.material.Material;
 import org.osm2world.core.target.common.material.Material.Interpolation;
 import org.osm2world.core.world.data.AbstractAreaWorldObject;
-import org.osm2world.core.world.data.LegacyWorldObject;
-import org.osm2world.core.world.data.TerrainBoundaryWorldObject;
+import org.osm2world.core.world.data.ProceduralWorldObject;
 import org.osm2world.core.world.data.WaySegmentWorldObject;
 import org.osm2world.core.world.modules.common.AbstractModule;
 
@@ -68,21 +68,26 @@ public class PoolModule extends AbstractModule {
 	}
 
 	public static class Pool extends AbstractAreaWorldObject
-			implements TerrainBoundaryWorldObject, LegacyWorldObject {
+			implements ProceduralWorldObject {
 
 		public Pool(MapArea area) {
 			super(area);
 		}
 
 		@Override
-		public void renderTo(Target target) {
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
+			return List.of(getOutlinePolygonXZ());
+		}
+
+		@Override
+		public void buildMeshesAndModels(Target target) {
 
 			/* render water */
 
 			List<TriangleXYZ> triangles = getTriangulation();
 
-			target.drawTriangles(PURIFIED_WATER, triangles,
-					triangleTexCoordLists(triangles, PURIFIED_WATER, GLOBAL_X_Z));
+			target.drawTriangles(WATER, triangles,
+					triangleTexCoordLists(triangles, WATER, GLOBAL_X_Z));
 
 			/* draw a small area around the pool */
 
@@ -96,7 +101,7 @@ public class PoolModule extends AbstractModule {
 					new VectorXZ(-width/2, 0)
 			);
 
-			List<VectorXYZ> path = getOutlinePolygon().vertices();
+			List<VectorXYZ> path = getOutlinePolygon().outer().vertices();
 
 			target.drawExtrudedShape(CONCRETE, wallShape, path,
 					nCopies(path.size(), Y_UNIT), null, null, null);
@@ -104,7 +109,7 @@ public class PoolModule extends AbstractModule {
 		}
 	}
 
-	private static class WaterSlide implements WaySegmentWorldObject, LegacyWorldObject {
+	private static class WaterSlide implements WaySegmentWorldObject, ProceduralWorldObject {
 
 		private static final Color DEFAULT_COLOR = ORANGE;
 
@@ -177,7 +182,7 @@ public class PoolModule extends AbstractModule {
 		}
 
 		@Override
-		public void renderTo(Target target) {
+		public void buildMeshesAndModels(Target target) {
 
 			//TODO parse material (e.g. for steel slides) and apply color to it
 

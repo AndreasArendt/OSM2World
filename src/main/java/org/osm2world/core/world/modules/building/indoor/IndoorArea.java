@@ -7,13 +7,12 @@ import java.util.Collection;
 import org.osm2world.core.map_data.data.MapArea;
 import org.osm2world.core.map_elevation.data.EleConnector;
 import org.osm2world.core.math.PolygonWithHolesXZ;
-import org.osm2world.core.target.Target;
 import org.osm2world.core.world.attachment.AttachmentSurface;
 import org.osm2world.core.world.data.AreaWorldObject;
-import org.osm2world.core.world.data.LegacyWorldObject;
+import org.osm2world.core.world.data.ProceduralWorldObject;
 import org.osm2world.core.world.data.WorldObject;
 
-public class IndoorArea implements AreaWorldObject, LegacyWorldObject {
+public class IndoorArea implements AreaWorldObject, ProceduralWorldObject {
 
     private final IndoorFloor floor;
 
@@ -28,11 +27,6 @@ public class IndoorArea implements AreaWorldObject, LegacyWorldObject {
         PolygonWithHolesXZ polygon = data.getPolygon();
         double floorHeight = data.getLevelHeightAboveBase();
 
-        /* allow for transparent windows for adjacent objects */
-        if (data.getMapElement() instanceof MapArea) {
-            data.getLevels().forEach(l -> data.getBuildingPart().getBuilding().addListWindowNodes(((MapArea) data.getMapElement()).getBoundaryNodes(), l));
-        }
-
         floor = new IndoorFloor(data.getBuildingPart(), data.getSurface(), polygon, floorHeight,
                 data.getRenderableLevels().contains(data.getMinLevel()), data.getMinLevel());
     }
@@ -41,9 +35,9 @@ public class IndoorArea implements AreaWorldObject, LegacyWorldObject {
         return floor.getAttachmentSurfaces();
     }
 
-    @Override
-    public void renderTo(Target target) {
-        floor.renderTo(target);
+	@Override
+	public void buildMeshesAndModels(Target target) {
+		floor.renderTo(target);
     }
 
 	@Override
@@ -59,6 +53,10 @@ public class IndoorArea implements AreaWorldObject, LegacyWorldObject {
 	@Override
 	public Iterable<EleConnector> getEleConnectors() {
 		return emptyList();
+	}
+
+	public int getFloorLevel() {
+		return floor.level;
 	}
 
 }

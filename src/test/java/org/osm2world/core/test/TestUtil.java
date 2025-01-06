@@ -2,18 +2,14 @@ package org.osm2world.core.test;
 
 import static java.lang.Math.abs;
 import static java.util.Arrays.asList;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.fail;
 
-import java.awt.Color;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
+import java.awt.*;
 import java.util.List;
-import java.util.Set;
+import java.util.*;
 
-import org.osm2world.core.math.PolygonXYZ;
-import org.osm2world.core.math.VectorXYZ;
-import org.osm2world.core.math.VectorXZ;
+import org.osm2world.core.math.*;
 import org.osm2world.core.math.shapes.SimplePolygonShapeXZ;
 import org.osm2world.core.util.color.LColor;
 
@@ -138,6 +134,10 @@ public final class TestUtil {
 		assertAlmostEquals(expected.verticesNoDup(), actual.verticesNoDup());
 	}
 
+	public static final void assertAlmostEquals(TriangleXYZ expected, TriangleXYZ actual) {
+		assertAlmostEqualsXYZ(expected.verticesNoDup(), actual.verticesNoDup());
+	}
+
 	public static final void assertAlmostEquals(PolygonXYZ expected, PolygonXYZ actual) {
 		assertAlmostEqualsXYZ(expected.verticesNoDup(), actual.verticesNoDup());
 	}
@@ -172,14 +172,14 @@ public final class TestUtil {
 	 * @param actual  the actual sequence, to be compared with expected, != null
 	 * @param expected  the expected sequence, != null
 	 */
-	public static final void assertSameCyclicOrder(boolean reversible,
-			List<VectorXZ> actual, VectorXZ... expected) {
+	public static final <V extends Vector3D> void assertSameCyclicOrder(boolean reversible,
+			List<V> actual, V... expected) {
 
 		if (actual.size() != expected.length) {
 			fail("expected size " + expected.length + ", found list of size " + actual.size());
 		}
 
-		List<VectorXZ> actualModified = new ArrayList<>(actual);
+		List<V> actualModified = new ArrayList<>(actual);
 
 		for (boolean reverse : asList(false, true)) {
 
@@ -197,7 +197,7 @@ public final class TestUtil {
 
 				for (int i = 0; i < actualModified.size(); i++) {
 					int iWithOffset = (i + offset) % actualModified.size();
-					if (VectorXZ.distance(expected[i], actualModified.get(iWithOffset)) > 0.0001) {
+					if (Vector3D.distance(expected[i], actualModified.get(iWithOffset)) > 0.0001) {
 						matches = false;
 						break;
 					}

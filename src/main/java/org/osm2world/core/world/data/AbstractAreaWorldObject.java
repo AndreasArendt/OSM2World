@@ -2,12 +2,14 @@ package org.osm2world.core.world.data;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singleton;
+import static org.osm2world.core.math.GeometryUtil.interpolateOnTriangle;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.function.Function;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.osm2world.core.map_data.data.MapArea;
@@ -48,7 +50,7 @@ public abstract class AbstractAreaWorldObject implements AreaWorldObject, Bounde
 
 		List<String> types = new ArrayList<>();
 
-		if (area.getTags().contains("location", "roof")) {
+		if (area.getTags().contains("location", "roof") || area.getTags().contains("parking", "rooftop")) {
 			if (area.getTags().containsKey("level")) {
 				List<Integer> levels = ValueParseUtil.parseLevels(area.getTags().getValue("level"));
 				if (levels != null) {
@@ -133,7 +135,7 @@ public abstract class AbstractAreaWorldObject implements AreaWorldObject, Bounde
 	public void defineEleConstraints(EleConstraintEnforcer enforcer) {}
 
 	@Override
-	public PolygonWithHolesXZ getOutlinePolygonXZ() {
+	public @Nonnull PolygonWithHolesXZ getOutlinePolygonXZ() {
 		// cache the otherwise unchanged result
 		if (outlinePolygonXZ == null) {
 			this.outlinePolygonXZ = (PolygonWithHolesXZ) AreaWorldObject.super.getOutlinePolygonXZ();
@@ -141,11 +143,11 @@ public abstract class AbstractAreaWorldObject implements AreaWorldObject, Bounde
 		return outlinePolygonXZ;
 	}
 
-	public PolygonXYZ getOutlinePolygon() {
+	public PolygonWithHolesXYZ getOutlinePolygon() {
 		if (getConnectorIfAttached() != null) {
-			return outlinePolygonXZ.getOuter().xyz(attachmentConnector.getAttachedPos().getY());
+			return outlinePolygonXZ.xyz(attachmentConnector.getAttachedPos().getY());
 		} else {
-			return connectors.getPosXYZ(outlinePolygonXZ.getOuter());
+			return connectors.getPosXYZ(outlinePolygonXZ);
 		}
 	}
 
@@ -177,6 +179,29 @@ public abstract class AbstractAreaWorldObject implements AreaWorldObject, Bounde
 				: connectors::getPosXYZ;
 
 		return TriangulationUtil.triangulationXZtoXYZ(getTriangulationXZ(), xzToXYZ);
+
+	}
+
+	/**
+	 * returns elevation at any point within the triangulation of this area
+	 */
+	public double getEleAt(VectorXZ pos) {
+
+		if (getConnectorIfAttached() != null) {
+			return getConnectorIfAttached().getAttachedPos().getY();
+		} else if (getEleConnectors().eleConnectors.stream().allMatch(it -> it.getPosXYZ().y == 0.0)) {
+			// fast case for disabled elevation
+			return 0.0;
+		}
+
+		var containingTriangle = getTriangulation().stream().filter(t -> t.xz().contains(pos)).findFirst();
+
+		if (containingTriangle.isPresent()) {
+			TriangleXYZ t = containingTriangle.get();
+			return interpolateOnTriangle(pos, t.xz(), t.v1.y, t.v2.y, t.v3.y);
+		} else {
+			throw new IllegalArgumentException(pos + " is not within the triangulation of " + this);
+		}
 
 	}
 

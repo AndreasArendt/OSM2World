@@ -5,7 +5,6 @@ import static java.lang.Math.cos;
 import static java.util.Arrays.asList;
 import static java.util.Collections.singletonList;
 import static org.osm2world.core.math.GeometryUtil.interpolateBetween;
-import static org.osm2world.core.math.VectorXYZ.NULL_VECTOR;
 import static org.osm2world.core.target.common.material.Materials.*;
 import static org.osm2world.core.target.common.texcoord.NamedTexCoordFunction.STRIP_FIT_HEIGHT;
 import static org.osm2world.core.target.common.texcoord.TexCoordUtil.texCoordLists;
@@ -13,6 +12,7 @@ import static org.osm2world.core.target.common.texcoord.TexCoordUtil.triangleTex
 
 import java.awt.*;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 import org.osm2world.core.map_data.data.MapArea;
@@ -21,17 +21,21 @@ import org.osm2world.core.math.SimplePolygonXZ;
 import org.osm2world.core.math.TriangleXYZ;
 import org.osm2world.core.math.VectorXYZ;
 import org.osm2world.core.math.VectorXZ;
-import org.osm2world.core.target.Target;
+import org.osm2world.core.math.shapes.PolygonShapeXZ;
 import org.osm2world.core.target.common.material.Material;
+import org.osm2world.core.target.common.material.TextureDataDimensions;
+import org.osm2world.core.target.common.material.TextureLayer;
 import org.osm2world.core.target.common.mesh.ExtrusionGeometry;
+import org.osm2world.core.target.common.mesh.LevelOfDetail;
 import org.osm2world.core.target.common.mesh.Mesh;
 import org.osm2world.core.target.common.model.InstanceParameters;
 import org.osm2world.core.target.common.model.Model;
+import org.osm2world.core.target.common.model.ModelInstance;
 import org.osm2world.core.target.common.texcoord.NamedTexCoordFunction;
 import org.osm2world.core.target.common.texcoord.TexCoordFunction;
+import org.osm2world.core.target.common.texcoord.TexCoordUtil;
 import org.osm2world.core.world.data.AbstractAreaWorldObject;
-import org.osm2world.core.world.data.LegacyWorldObject;
-import org.osm2world.core.world.data.TerrainBoundaryWorldObject;
+import org.osm2world.core.world.data.ProceduralWorldObject;
 import org.osm2world.core.world.modules.common.AbstractModule;
 
 /**
@@ -62,7 +66,7 @@ public class SportsModule extends AbstractModule {
 	 * a pitch with markings for any sport
 	 */
 	static abstract class Pitch extends AbstractAreaWorldObject
-			implements TerrainBoundaryWorldObject, LegacyWorldObject {
+			implements ProceduralWorldObject {
 
 		public Pitch(MapArea area) {
 
@@ -93,11 +97,17 @@ public class SportsModule extends AbstractModule {
 		protected abstract Material getFallbackPitchMaterial();
 
 		@Override
-		public void renderTo(Target target) {
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
+			return List.of(getOutlinePolygonXZ());
+		}
+
+		@Override
+		public void buildMeshesAndModels(Target target) {
 
 			List<TriangleXYZ> triangles = getTriangulation();
 
-			TexCoordFunction texFunction = configureTexFunction(area.getOuterPolygon());
+			List<TextureLayer> layers = getPitchMaterial().getTextureLayers();
+			TexCoordFunction texFunction = configureTexFunction(area.getOuterPolygon(), layers.get(layers.size() - 1).baseColorTexture.dimensions());
 
 			if (texFunction != null) {
 
@@ -124,7 +134,8 @@ public class SportsModule extends AbstractModule {
 		 * @return  the texture coordinate function;
 		 * null if it's not possible to construct a valid pitch
 		 */
-		protected PitchTexFunction configureTexFunction(SimplePolygonXZ polygon) {
+		protected PitchTexFunction configureTexFunction(SimplePolygonXZ polygon,
+														TextureDataDimensions textureDimensions) {
 
 			/* approximate a rectangular shape for the pitch */
 
@@ -173,7 +184,7 @@ public class SportsModule extends AbstractModule {
 
 			/* build the result */
 
-			return new PitchTexFunction(origin, longSide, shortSide);
+			return new PitchTexFunction(origin, longSide, shortSide, textureDimensions);
 
 		}
 
@@ -185,12 +196,15 @@ public class SportsModule extends AbstractModule {
 			private final VectorXZ origin;
 			private final VectorXZ longSide;
 			private final VectorXZ shortSide;
+			private final TextureDataDimensions textureDimensions;
 
-			PitchTexFunction(VectorXZ origin, VectorXZ longSide, VectorXZ shortSide) {
+			PitchTexFunction(VectorXZ origin, VectorXZ longSide, VectorXZ shortSide,
+							 TextureDataDimensions textureDimensions) {
 
 				this.origin = origin;
 				this.longSide = longSide;
 				this.shortSide = shortSide;
+				this.textureDimensions = textureDimensions;
 
 			}
 
@@ -221,9 +235,11 @@ public class SportsModule extends AbstractModule {
 					double angleShort = VectorXZ.angleBetween(v, shortSide);
 					double shortSideProjectedLength = v.length() * cos(angleShort);
 
-					result.add(new VectorXZ(
-							shortSideProjectedLength / shortSide.length(),
-							longSideProjectedLength / longSide.length()));
+					VectorXZ rawTexCoord = new VectorXZ(
+									shortSideProjectedLength / shortSide.length(),
+									longSideProjectedLength / longSide.length());
+
+					result.add(TexCoordUtil.applyPadding(rawTexCoord, textureDimensions));
 
 				}
 
@@ -290,8 +306,9 @@ public class SportsModule extends AbstractModule {
 			@Override
 			public List<Mesh> buildMeshes(InstanceParameters params) {
 				return singletonList(new Mesh(ExtrusionGeometry.createColumn(
-						null, NULL_VECTOR, netHeightAtPosts, postRadius, postRadius, false, true,
-						new Color(184, 184, 184), PLASTIC.getTextureDimensions()), PLASTIC));
+						null, params.position(), netHeightAtPosts, postRadius, postRadius, false, true,
+						new Color(184, 184, 184), PLASTIC.getTextureDimensions()), PLASTIC,
+						LevelOfDetail.LOD2, LevelOfDetail.LOD4));
 			}
 		};
 
@@ -354,15 +371,16 @@ public class SportsModule extends AbstractModule {
 		}
 
 		@Override
-		public void renderTo(Target target) {
+		public void buildMeshesAndModels(Target target) {
 
 			/* let the supertype draw the pitch surface */
 
-			super.renderTo(target);
+			super.buildMeshesAndModels(target);
 
 			/* add a net with posts */
 
-			PitchTexFunction texFunction = configureTexFunction(area.getOuterPolygon());
+			List<TextureLayer> layers = getPitchMaterial().getTextureLayers();
+			PitchTexFunction texFunction = configureTexFunction(area.getOuterPolygon(), layers.get(layers.size() - 1).baseColorTexture.dimensions());
 
 			//TODO: support this feature when elevation is enabled
 
@@ -397,10 +415,12 @@ public class SportsModule extends AbstractModule {
 				/* add two posts */
 
 				for (VectorXYZ postPosition : asList(postPositionA, postPositionB)) {
-					target.drawModel(tennisNetPost, new InstanceParameters(postPosition, 0));
+					target.addSubModel(new ModelInstance(tennisNetPost, new InstanceParameters(postPosition, 0)));
 				}
 
 				/* draw the net (with an approximated droop in the center) */
+
+				target.setCurrentLodRange(LevelOfDetail.LOD2, LevelOfDetail.LOD4);
 
 				final int numInterpolatedPoints = 20;
 

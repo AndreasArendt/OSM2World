@@ -2,20 +2,18 @@ package org.osm2world.core.world.modules.building.indoor;
 
 import static java.util.Collections.emptyList;
 
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.List;
 
+import org.apache.commons.lang.math.IntRange;
 import org.osm2world.core.map_data.data.MapArea;
 import org.osm2world.core.map_elevation.data.EleConnector;
-import org.osm2world.core.target.Target;
 import org.osm2world.core.world.attachment.AttachmentSurface;
 import org.osm2world.core.world.data.AreaWorldObject;
-import org.osm2world.core.world.data.LegacyWorldObject;
+import org.osm2world.core.world.data.ProceduralWorldObject;
 import org.osm2world.core.world.data.WorldObject;
 import org.osm2world.core.world.modules.building.BuildingDefaults;
 
-public class IndoorRoom implements AreaWorldObject, LegacyWorldObject {
+public class IndoorRoom implements AreaWorldObject, ProceduralWorldObject {
 
     private final IndoorWall wall;
     private final IndoorFloor floor;
@@ -43,30 +41,14 @@ public class IndoorRoom implements AreaWorldObject, LegacyWorldObject {
                 data.getTopOfTopLevelHeightAboveBase(),
                 data.getRenderableLevels().contains(data.getMaxLevel()), data.getMaxLevel());
 
-        if (data.getMapElement() instanceof MapArea) {
-            data.getLevels().forEach(l ->  data.getBuildingPart().getBuilding().addListWindowNodes(((MapArea) data.getMapElement()).getBoundaryNodes(), l));
-        }
-
     }
 
     public Collection<AttachmentSurface> getAttachmentSurfaces() {
-
-        Collection<AttachmentSurface> floorSurfaces = floor.getAttachmentSurfaces();
-        Collection<AttachmentSurface> ceilingSurfaces = ceiling.getAttachmentSurfaces();
-        Collection<AttachmentSurface> wallSurfaces = wall.getAttachmentSurfaces();
-
-        List<AttachmentSurface> surfaces = new ArrayList<>();
-
-        surfaces.addAll(floorSurfaces);
-        surfaces.addAll(ceilingSurfaces);
-        surfaces.addAll(wallSurfaces);
-
-        return surfaces;
-
+        return floor.getAttachmentSurfaces();
     }
 
-    @Override
-    public void renderTo(Target target) {
+	@Override
+	public void buildMeshesAndModels(Target target) {
 
         wall.renderTo(target);
 
@@ -89,6 +71,10 @@ public class IndoorRoom implements AreaWorldObject, LegacyWorldObject {
 	@Override
 	public Iterable<EleConnector> getEleConnectors() {
 		return emptyList();
+	}
+
+	public IntRange getLevelRange() {
+		return new IntRange(floor.level, ceiling.level);
 	}
 
 }

@@ -118,6 +118,11 @@ public abstract class Material {
 				getTransparency(), getShadow(), getAmbientOcclusion(), getTextureLayers());
 	}
 
+	public Material makeDoubleSided() {
+		return new ImmutableMaterial(getInterpolation(), getColor(), true,
+				getTransparency(), getShadow(), getAmbientOcclusion(), getTextureLayers());
+	}
+
 	/**
 	 * returns a material that is like this one,
 	 * except with a different list of {@link TextureLayer}s
@@ -193,8 +198,7 @@ public abstract class Material {
 				if(counter==numberOfTextLayer) {
 
 					//create a new TextTextureData instance with different textColor
-					TextTexture newTextTexture = new TextTexture(texture.text, texture.font, texture.width,
-							texture.height, texture.widthPerEntity, texture.heightPerEntity,
+					TextTexture newTextTexture = new TextTexture(texture.text, texture.font, texture.dimensions,
 							texture.topOffset, texture.leftOffset,
 							color, texture.relativeFontSize,
 							texture.wrap, t -> texture.coordFunction);
@@ -277,8 +281,7 @@ public abstract class Material {
 
 			if (!newText.equals(textTexture.text)) {
 				return new TextTexture(newText,
-						textTexture.font, textTexture.width, textTexture.height,
-						textTexture.widthPerEntity, textTexture.heightPerEntity,
+						textTexture.font, textTexture.dimensions,
 						textTexture.topOffset, textTexture.leftOffset,
 						textTexture.textColor, textTexture.relativeFontSize,
 						textTexture.wrap, t -> textTexture.coordFunction);

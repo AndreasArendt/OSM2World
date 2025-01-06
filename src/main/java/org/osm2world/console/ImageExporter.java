@@ -1,6 +1,7 @@
 package org.osm2world.console;
 
-import static java.lang.Math.*;
+import static java.lang.Math.max;
+import static java.lang.Math.min;
 import static org.osm2world.core.target.jogl.JOGLRenderingParameters.Winding.CCW;
 import static org.osm2world.core.util.ConfigUtil.*;
 
@@ -25,20 +26,11 @@ import org.osm2world.core.target.TargetUtil;
 import org.osm2world.core.target.common.lighting.GlobalLightingParameters;
 import org.osm2world.core.target.common.rendering.Camera;
 import org.osm2world.core.target.common.rendering.Projection;
-import org.osm2world.core.target.jogl.AbstractJOGLTarget;
-import org.osm2world.core.target.jogl.JOGLRenderingParameters;
-import org.osm2world.core.target.jogl.JOGLTarget;
-import org.osm2world.core.target.jogl.JOGLTargetFixedFunction;
-import org.osm2world.core.target.jogl.JOGLTargetShader;
-import org.osm2world.core.target.jogl.JOGLTextureManager;
+import org.osm2world.core.target.jogl.*;
+import org.osm2world.core.util.ConfigUtil;
+import org.osm2world.core.util.Resolution;
 
-import com.jogamp.opengl.GL;
-import com.jogamp.opengl.GLAutoDrawable;
-import com.jogamp.opengl.GLCapabilities;
-import com.jogamp.opengl.GLDrawableFactory;
-import com.jogamp.opengl.GLEventListener;
-import com.jogamp.opengl.GLOffscreenAutoDrawable;
-import com.jogamp.opengl.GLProfile;
+import com.jogamp.opengl.*;
 import com.jogamp.opengl.util.awt.AWTGLReadBufferUtil;
 
 import ar.com.hjg.pngj.ImageInfo;
@@ -63,9 +55,9 @@ public class ImageExporter {
 
 	private File backgroundImage;
 	private JOGLTextureManager backgroundTextureManager;
-	private Color clearColor;
 
-	private boolean exportAlpha = false;
+	private final Color clearColor;
+	private final boolean exportAlpha;
 
 	private GLOffscreenAutoDrawable drawable;
 	private ImageExporterGLEventListener listener;
@@ -80,73 +72,45 @@ public class ImageExporter {
 
 	/**
 	 * Creates an {@link ImageExporter} for later use.
-	 * Also performs calculations that only need to be done once for a group
-	 * of files, based on a {@link CLIArgumentsGroup}.
-	 *
-	 * @param expectedGroup  group that should contain at least the arguments
-	 *                       for the files that will later be requested.
-	 *                       Basis for optimization preparations.
+	 * Already performs calculations that only need to be done once for a group of files.
 	 */
-	public ImageExporter(Configuration config, Results results,
-			CLIArgumentsGroup expectedGroup) {
+	private ImageExporter(Configuration config, Results results,
+						  int pBufferSizeX, int pBufferSizeY, boolean unbufferedRendering) {
 
 		this.results = results;
 		this.config = config;
 
-		/* parse background color/image and other configuration options */
+		this.pBufferSizeX = pBufferSizeX;
+		this.pBufferSizeY = pBufferSizeY;
+		this.unbufferedRendering = unbufferedRendering;
 
-		clearColor = new Color(0, 0, 0, 0);
-
-		if (config.containsKey(BG_COLOR_KEY)) {
-			Color confClearColor = parseColor(config.getString(BG_COLOR_KEY));
-			if (confClearColor != null) {
-				clearColor = confClearColor;
-			} else {
-				System.err.println("incorrect color value: "
-						+ config.getString(BG_COLOR_KEY));
-			}
-		}
-
-		if (config.containsKey(BG_IMAGE_KEY)) {
-			String fileString = config.getString(BG_IMAGE_KEY);
-			if (fileString != null) {
-				backgroundImage = new File(fileString);
-				if (!backgroundImage.exists()) {
-					System.err.println("background image file doesn't exist: "
-							+ backgroundImage);
-					backgroundImage = null;
-				}
-			}
-		}
-
-		exportAlpha = config.getBoolean("exportAlpha", false);
+		/* warn about potentially oversized canvas dimensions */
 
 		int canvasLimit = config.getInt(CANVAS_LIMIT_KEY, DEFAULT_CANVAS_LIMIT);
 
-		/* find out what number and size of image file requests to expect */
-
-		int expectedFileCalls = 0;
-		int expectedMaxSizeX = 1;
-		int expectedMaxSizeY = 1;
-
-		for (CLIArguments args : expectedGroup.getCLIArgumentsList()) {
-
-			for (File outputFile : args.getOutput()) {
-				OutputMode outputMode = CLIArgumentsUtil.getOutputMode(outputFile);
-				if (outputMode == OutputMode.PNG || outputMode == OutputMode.PPM || outputMode == OutputMode.GD) {
-					expectedFileCalls += 1;
-					expectedMaxSizeX = max(expectedMaxSizeX, args.getResolution().width);
-					expectedMaxSizeY = max(expectedMaxSizeY, args.getResolution().height);
-				}
-			}
-
+		if (pBufferSizeX > canvasLimit || pBufferSizeY > canvasLimit) {
+			System.err.println("Warning: Canvas for image export may be too large for the system's capabilities");
 		}
-		boolean onlyOneRenderPass = (expectedFileCalls <= 1
-				&& expectedMaxSizeX <= canvasLimit
-				&& expectedMaxSizeY <= canvasLimit);
 
-		unbufferedRendering = onlyOneRenderPass
-				|| config.getBoolean("forceUnbufferedPNGRendering", false);
+		/* parse background color/image and other configuration options */
+
+		this.exportAlpha = config.getBoolean("exportAlpha", false);
+
+		Color bgColor = parseColor(config.getString(BG_COLOR_KEY), Color.BLACK);
+		if (exportAlpha) {
+			this.clearColor = new Color(bgColor.getRed(), bgColor.getGreen(), bgColor.getBlue(), 0);
+		} else {
+			this.clearColor = bgColor;
+		}
+
+		if (config.containsKey(BG_IMAGE_KEY)) {
+			backgroundImage = ConfigUtil.resolveFileConfigProperty(config, config.getString(BG_IMAGE_KEY));
+			if (backgroundImage == null || !backgroundImage.exists()) {
+				System.err.println("background image file doesn't exist: "
+						+ backgroundImage);
+				backgroundImage = null;
+			}
+		}
 
 		/* create GL canvas and set rendering parameters */
 
@@ -183,15 +147,92 @@ public class ImageExporter {
 			}
 		}
 
-		pBufferSizeX = min(canvasLimit, expectedMaxSizeX);
-		pBufferSizeY = min(canvasLimit, expectedMaxSizeY);
-
 		drawable = factory.createOffscreenAutoDrawable(null,
 				cap, null, pBufferSizeX, pBufferSizeY);
 		listener = new ImageExporterGLEventListener();
 		drawable.addGLEventListener(listener);
 
 		backgroundTextureManager = new JOGLTextureManager(drawable.getGL());
+
+	}
+
+	/**
+	 * Creates an {@link ImageExporter} for later use.
+	 * Also performs calculations that only need to be done once for a group
+	 * of files, based on a {@link CLIArgumentsGroup}.
+	 *
+	 * @param expectedGroup  group that should contain at least the arguments
+	 *                       for the files that will later be requested.
+	 *                       Basis for optimization preparations.
+	 */
+	public static ImageExporter create(Configuration config, Results results,
+			CLIArgumentsGroup expectedGroup) {
+
+		int canvasLimit = config.getInt(CANVAS_LIMIT_KEY, DEFAULT_CANVAS_LIMIT);
+
+		/* find out what number and size of image file requests to expect */
+
+		int expectedFileCalls = 0;
+		int expectedMaxSizeX = 1;
+		int expectedMaxSizeY = 1;
+		boolean perspectiveProjection = false;
+
+		for (CLIArguments args : expectedGroup.getCLIArgumentsList()) {
+
+			for (File outputFile : args.getOutput()) {
+				OutputMode outputMode = CLIArgumentsUtil.getOutputMode(outputFile);
+				if (outputMode == OutputMode.PNG || outputMode == OutputMode.PPM || outputMode == OutputMode.GD) {
+					expectedFileCalls += 1;
+					expectedMaxSizeX = max(expectedMaxSizeX, args.getResolution().width);
+					expectedMaxSizeY = max(expectedMaxSizeY, args.getResolution().height);
+					perspectiveProjection |= args.isPviewPos();
+				}
+			}
+
+		}
+
+		boolean onlyOneRenderPass = (expectedFileCalls <= 1
+				&& expectedMaxSizeX <= canvasLimit
+				&& expectedMaxSizeY <= canvasLimit);
+
+		/* call the constructor */
+
+		boolean unbufferedRendering = onlyOneRenderPass
+				|| config.getBoolean("forceUnbufferedPNGRendering", false);
+
+		int pBufferSizeX, pBufferSizeY;
+
+		if (perspectiveProjection) {
+			pBufferSizeX = expectedMaxSizeX;
+			pBufferSizeY = expectedMaxSizeY;
+		} else {
+			pBufferSizeX = min(canvasLimit, expectedMaxSizeX);
+			pBufferSizeY = min(canvasLimit, expectedMaxSizeY);
+		}
+
+		return new ImageExporter(config, results, pBufferSizeX, pBufferSizeY, unbufferedRendering);
+
+	}
+
+	/**
+	 * Creates an {@link ImageExporter} for later use.
+	 * Performance-related parameters are set such that they work best for rendering a single image.
+	 *
+	 * @param canvasResolution  the maximum resolution of the internal rendering canvas.
+	 *   This is the maximum size of images that can be rendered in a single pass.
+	 *   (Images with an orthographic projection can be automatically split and rendered in multiple passes,
+	 *   but those with a perspective projection need to be rendered all at once.)
+	 *   If the value is too high for the system's capabilities, OSM2World may crash.
+	 */
+	public static ImageExporter create(Configuration config, Results results,
+									   Resolution canvasResolution) {
+
+		boolean unbufferedRendering = true;
+
+		int pBufferSizeX = canvasResolution.width;
+		int pBufferSizeY = canvasResolution.height;
+
+		return new ImageExporter(config, results, pBufferSizeX, pBufferSizeY, unbufferedRendering);
 
 	}
 

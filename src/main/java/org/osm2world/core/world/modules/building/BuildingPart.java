@@ -3,8 +3,9 @@ package org.osm2world.core.world.modules.building;
 import static com.google.common.collect.Iterables.getLast;
 import static java.util.Arrays.asList;
 import static java.util.Collections.*;
-import static java.util.stream.Collectors.toList;
 import static org.osm2world.core.math.SimplePolygonXZ.asSimplePolygon;
+import static org.osm2world.core.target.common.mesh.LevelOfDetail.LOD3;
+import static org.osm2world.core.target.common.mesh.LevelOfDetail.LOD4;
 import static org.osm2world.core.util.ValueParseUtil.parseColor;
 import static org.osm2world.core.util.ValueParseUtil.parseLevels;
 import static org.osm2world.core.util.color.ColorNameDefinitions.CSS_COLORS;
@@ -29,11 +30,14 @@ import org.osm2world.core.math.VectorXZ;
 import org.osm2world.core.math.algorithms.CAGUtil;
 import org.osm2world.core.math.shapes.PolygonShapeXZ;
 import org.osm2world.core.math.shapes.SimplePolygonShapeXZ;
-import org.osm2world.core.target.Target;
 import org.osm2world.core.target.common.material.Material;
 import org.osm2world.core.target.common.material.Materials;
+import org.osm2world.core.target.common.mesh.LevelOfDetail;
 import org.osm2world.core.world.attachment.AttachmentSurface;
-import org.osm2world.core.world.data.*;
+import org.osm2world.core.world.data.AreaWorldObject;
+import org.osm2world.core.world.data.ProceduralWorldObject;
+import org.osm2world.core.world.data.WaySegmentWorldObject;
+import org.osm2world.core.world.data.WorldObject;
 import org.osm2world.core.world.modules.building.LevelAndHeightData.Level;
 import org.osm2world.core.world.modules.building.LevelAndHeightData.Level.LevelType;
 import org.osm2world.core.world.modules.building.indoor.BuildingPartInterior;
@@ -42,12 +46,13 @@ import org.osm2world.core.world.modules.building.roof.Roof;
 
 /**
  * part of a building, as defined by the Simple 3D Buildings standard.
- * Consists of {@link Wall}s, a {@link Roof}, and maybe a {@link Floor}.
+ * Consists of {@link ExteriorBuildingWall}s, a {@link Roof}, and maybe a {@link BuildingBottom}.
  * This is the core class of the {@link BuildingModule}.
  */
-public class BuildingPart implements AreaWorldObject, LegacyWorldObject {
+public class BuildingPart implements AreaWorldObject, ProceduralWorldObject {
 
 	static final double DEFAULT_RIDGE_HEIGHT = 5;
+	static final LevelOfDetail INDOOR_MIN_LOD = LOD3;
 
 	final Building building;
 	final MapArea area;
@@ -62,8 +67,8 @@ public class BuildingPart implements AreaWorldObject, LegacyWorldObject {
 
 	Roof roof;
 
-	private List<Wall> walls = null;
-	private List<Floor> floors = null;
+	private List<ExteriorBuildingWall> walls = null;
+	private List<BuildingBottom> bottoms = null;
 
 	private final @Nullable BuildingPartInterior buildingPartInterior;
 
@@ -107,7 +112,7 @@ public class BuildingPart implements AreaWorldObject, LegacyWorldObject {
 		/* determine the level structure */
 
 		levelStructure = new LevelAndHeightData(building.getPrimaryMapElement().getTags(),
-				area.getTags(), levelTagSets, roofShape, this.area.getPolygon());
+				area.getTags(), levelTagSets, roofShape, this.area.getPolygon(), this.area);
 
 		/* build the roof */
 
@@ -130,10 +135,6 @@ public class BuildingPart implements AreaWorldObject, LegacyWorldObject {
 			buildingPartInterior = null;
 		}
 
-		for (Level level : levelStructure.levels(EnumSet.of(LevelType.ABOVEGROUND))) {
-			getBuilding().addListWindowNodes(area.getBoundaryNodes(), level.level);
-		}
-
 	}
 
 	/** creates the walls, floors etc. making up this part */
@@ -148,15 +149,14 @@ public class BuildingPart implements AreaWorldObject, LegacyWorldObject {
 
 		double clearingAbovePassage = 2.5;
 
-		List<TerrainBoundaryWorldObject> buildingPassages = area.getOverlaps().stream()
+		List<WorldObject> buildingPassages = area.getOverlaps().stream()
 				.map(o -> o.getOther(area))
-				.filter(o -> o.getTags().containsAny(asList("tunnel"), asList("building_passage", "passage")))
-				.filter(o -> o.getPrimaryRepresentation() instanceof TerrainBoundaryWorldObject)
-				.map(o -> (TerrainBoundaryWorldObject)o.getPrimaryRepresentation())
-				.filter(o -> o.getOutlinePolygonXZ() != null)
+				.filter(o -> o.getTags().containsAny(List.of("tunnel"), asList("building_passage", "passage")))
+				.map(MapElement::getPrimaryRepresentation)
+				.filter(o -> !o.getRawGroundFootprint().isEmpty())
 				.filter(o -> o.getGroundState() == GroundState.ON)
 				.filter(o -> clearingAbovePassage > floorHeight)
-				.collect(toList());
+				.toList();
 
 		if (buildingPassages.isEmpty()) {
 
@@ -165,52 +165,56 @@ public class BuildingPart implements AreaWorldObject, LegacyWorldObject {
 			walls = splitIntoWalls(area, this);
 
 			if (floorHeight > 0) {
-				floors = singletonList(new Floor(this, materialWall, polygon, floorHeight));
+				bottoms = singletonList(new BuildingBottom(this, materialWall, polygon, floorHeight));
 			} else {
-				floors = emptyList();
+				bottoms = emptyList();
 			}
 
 		} else {
 
 			Map<PolygonWithHolesXZ, Double> polygonFloorHeightMap = new HashMap<>();
 
-			/* construct those polygons where the area does not overlap with terrain boundaries */
+			/* construct those polygons where the area does not overlap with the footprint of buildingPassages */
 
 			List<SimplePolygonShapeXZ> subtractPolygons = new ArrayList<>();
 
-			for (TerrainBoundaryWorldObject o : buildingPassages) {
+			for (WorldObject o : buildingPassages) {
 
-				SimplePolygonShapeXZ subtractPoly = o.getOutlinePolygonXZ().getOuter();
+				for (PolygonShapeXZ subtractPolyShape : o.getRawGroundFootprint()) {
 
-				subtractPolygons.add(subtractPoly);
+					SimplePolygonShapeXZ subtractPoly = subtractPolyShape.getOuter();
 
-				if (o instanceof WaySegmentWorldObject) {
+					subtractPolygons.add(subtractPoly);
 
-					// extend the subtract polygon for segments that end
-					// at a common node with this building part's outline.
-					// (otherwise, the subtract polygon will probably
-					// not exactly line up with the polygon boundary)
+					if (o instanceof WaySegmentWorldObject) {
 
-					WaySegmentWorldObject waySegmentWO = (WaySegmentWorldObject)o;
-					VectorXZ start = waySegmentWO.getStartPosition();
-					VectorXZ end = waySegmentWO.getEndPosition();
+						// extend the subtract polygon for segments that end
+						// at a common node with this building part's outline.
+						// (otherwise, the subtract polygon will probably
+						// not exactly line up with the polygon boundary)
 
-					boolean startCommonNode = false;
-					boolean endCommonNode = false;
+						WaySegmentWorldObject waySegmentWO = (WaySegmentWorldObject) o;
+						VectorXZ start = waySegmentWO.getStartPosition();
+						VectorXZ end = waySegmentWO.getEndPosition();
 
-					for (SimplePolygonXZ p : polygon.getRings()) {
-						startCommonNode |= p.getVertexCollection().contains(start);
-						endCommonNode |= p.getVertexCollection().contains(end);
-					}
+						boolean startCommonNode = false;
+						boolean endCommonNode = false;
 
-					VectorXZ direction = end.subtract(start).normalize();
+						for (SimplePolygonXZ p : polygon.getRings()) {
+							startCommonNode |= p.getVertexCollection().contains(start);
+							endCommonNode |= p.getVertexCollection().contains(end);
+						}
 
-					if (startCommonNode) {
-						subtractPolygons.add(subtractPoly.shift(direction));
-					}
+						VectorXZ direction = end.subtract(start).normalize();
 
-					if (endCommonNode) {
-						subtractPolygons.add(subtractPoly.shift(direction.invert()));
+						if (startCommonNode) {
+							subtractPolygons.add(subtractPoly.shift(direction));
+						}
+
+						if (endCommonNode) {
+							subtractPolygons.add(subtractPoly.shift(direction.invert()));
+						}
+
 					}
 
 				}
@@ -230,8 +234,8 @@ public class BuildingPart implements AreaWorldObject, LegacyWorldObject {
 
 			/* construct the polygons directly above the passages */
 
-			for (TerrainBoundaryWorldObject o : buildingPassages) {
-				for (PolygonShapeXZ b : o.getTerrainBoundariesXZ()) {
+			for (WorldObject o : buildingPassages) {
+				for (PolygonShapeXZ b : o.getRawGroundFootprint()) {
 
 					Collection<PolygonWithHolesXZ> raisedBuildingPartPolys;
 
@@ -264,18 +268,18 @@ public class BuildingPart implements AreaWorldObject, LegacyWorldObject {
 
 			/* create the walls and floors */
 
-			floors = new ArrayList<>();
+			bottoms = new ArrayList<>();
 			walls = new ArrayList<>();
 
 			for (PolygonWithHolesXZ polygon : polygonFloorHeightMap.keySet()) {
 
-				floors.add(new Floor(this, materialWall, polygon, polygonFloorHeightMap.get(polygon)));
+				bottoms.add(new BuildingBottom(this, materialWall, polygon, polygonFloorHeightMap.get(polygon)));
 
 				for (SimplePolygonXZ ring : polygon.getRings()) {
 					ring = polygon.getOuter().equals(ring) ? ring.makeCounterclockwise() : ring.makeClockwise();
 					ring = ring.getSimplifiedPolygon();
 					for (int i = 0; i < ring.size(); i++) {
-						walls.add(new Wall(null, this,
+						walls.add(new ExteriorBuildingWall(null, this,
 								asList(ring.getVertex(i), ring.getVertexAfter(i)),
 								emptyMap(),
 								polygonFloorHeightMap.get(polygon)));
@@ -336,9 +340,9 @@ public class BuildingPart implements AreaWorldObject, LegacyWorldObject {
 	 * @return list of walls, each represented as a list of nodes.
 	 *   The list of nodes is ordered such that the building part's outside is to the right.
 	 */
-	static List<Wall> splitIntoWalls(MapArea buildingPartArea, BuildingPart buildingPart) {
+	static List<ExteriorBuildingWall> splitIntoWalls(MapArea buildingPartArea, BuildingPart buildingPart) {
 
-		List<Wall> result = new ArrayList<>();
+		List<ExteriorBuildingWall> result = new ArrayList<>();
 
 		for (List<MapNode> nodeRing : buildingPartArea.getRings()) {
 
@@ -416,7 +420,7 @@ public class BuildingPart implements AreaWorldObject, LegacyWorldObject {
 							}
 						}
 
-						result.add(new Wall(wallWay, buildingPart, currentWallNodes));
+						result.add(new ExteriorBuildingWall(wallWay, buildingPart, currentWallNodes));
 
 					}
 					currentWallNodes = new ArrayList<>();
@@ -433,7 +437,7 @@ public class BuildingPart implements AreaWorldObject, LegacyWorldObject {
 	}
 
 	@Override
-	public void renderTo(Target target) {
+	public void buildMeshesAndModels(Target target) {
 
 		if (walls == null) {
 			// the reason why this is called here rather than the constructor is tunnel=building_passage:
@@ -452,10 +456,12 @@ public class BuildingPart implements AreaWorldObject, LegacyWorldObject {
 
 		// TODO don't render floors inside building
 
-		floors.forEach(f -> f.renderTo(target));
+		bottoms.forEach(f -> f.renderTo(target));
 
-		if (buildingPartInterior != null){
-			buildingPartInterior.renderTo(target);
+		target.setCurrentLodRange(INDOOR_MIN_LOD, LOD4);
+
+		if (buildingPartInterior != null) {
+			buildingPartInterior.buildMeshesAndModels(target);
 		}
 
 	}
@@ -480,15 +486,20 @@ public class BuildingPart implements AreaWorldObject, LegacyWorldObject {
 		surfaces.addAll(roof.getAttachmentSurfaces(
 				building.getGroundLevelEle() + levelStructure.heightWithoutRoof(), roofAttachmentLevel));
 
-		for (Wall wall : walls) {
-			surfaces.addAll(wall.getAttachmentSurfaces());
-		}
-
 		return surfaces;
 	}
 
 	public PolygonWithHolesXZ getPolygon() {
 		return polygon;
+	}
+
+	@Override
+	public Collection<PolygonShapeXZ> getRawGroundFootprint(){
+		if (levelStructure.bottomHeight() <= 0 && getIndoor() != null) {
+			return List.of(getPolygon());
+		} else {
+			return emptyList();
+		}
 	}
 
 	public Roof getRoof() {

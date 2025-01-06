@@ -17,6 +17,7 @@ import static org.osm2world.core.target.common.mesh.LevelOfDetail.*;
 import static org.osm2world.core.target.common.texcoord.NamedTexCoordFunction.*;
 import static org.osm2world.core.target.common.texcoord.TexCoordUtil.texCoordLists;
 import static org.osm2world.core.target.common.texcoord.TexCoordUtil.triangleTexCoordLists;
+import static org.osm2world.core.util.ValueParseUtil.ValueConstraint.POSITIVE;
 import static org.osm2world.core.util.ValueParseUtil.*;
 import static org.osm2world.core.util.color.ColorNameDefinitions.CSS_COLORS;
 import static org.osm2world.core.world.modules.common.WorldModuleGeometryUtil.createLineBetween;
@@ -25,6 +26,8 @@ import static org.osm2world.core.world.modules.common.WorldModuleParseUtil.inher
 import static org.osm2world.core.world.modules.common.WorldModuleParseUtil.parseWidth;
 
 import java.util.*;
+
+import javax.annotation.Nullable;
 
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang3.ArrayUtils;
@@ -37,16 +40,14 @@ import org.osm2world.core.math.shapes.PolygonShapeXZ;
 import org.osm2world.core.math.shapes.PolylineXZ;
 import org.osm2world.core.math.shapes.ShapeXZ;
 import org.osm2world.core.target.CommonTarget;
-import org.osm2world.core.target.Target;
 import org.osm2world.core.target.common.material.Material;
 import org.osm2world.core.target.common.material.Materials;
 import org.osm2world.core.target.common.material.TextureDataDimensions;
 import org.osm2world.core.target.common.mesh.Mesh;
 import org.osm2world.core.target.common.texcoord.TexCoordFunction;
+import org.osm2world.core.target.common.texcoord.TexCoordUtil;
 import org.osm2world.core.util.enums.LeftRight;
-import org.osm2world.core.world.data.LegacyWorldObject;
 import org.osm2world.core.world.data.ProceduralWorldObject;
-import org.osm2world.core.world.data.TerrainBoundaryWorldObject;
 import org.osm2world.core.world.modules.common.ConfigurableWorldModule;
 import org.osm2world.core.world.network.AbstractNetworkWaySegmentWorldObject;
 import org.osm2world.core.world.network.JunctionNodeWorldObject;
@@ -568,7 +569,7 @@ public class RoadModule extends ConfigurableWorldModule {
 	 * representation for junctions between roads.
 	 */
 	public static class RoadJunction extends JunctionNodeWorldObject<Road>
-			implements TerrainBoundaryWorldObject, ProceduralWorldObject {
+			implements ProceduralWorldObject {
 
 		public RoadJunction(MapNode node) {
 			super(node, Road.class);
@@ -611,7 +612,7 @@ public class RoadModule extends ConfigurableWorldModule {
 	 */
 	public static class RoadConnector
 		extends VisibleConnectorNodeWorldObject<Road>
-		implements TerrainBoundaryWorldObject, ProceduralWorldObject {
+		implements ProceduralWorldObject {
 
 		private static final double MAX_CONNECTOR_LENGTH = 5;
 
@@ -669,7 +670,7 @@ public class RoadModule extends ConfigurableWorldModule {
 	 */
 	public static class RoadCrossingAtConnector
 		extends VisibleConnectorNodeWorldObject<Road>
-		implements TerrainBoundaryWorldObject, ProceduralWorldObject {
+		implements ProceduralWorldObject {
 
 		private static final double CROSSING_WIDTH = 3.0;
 
@@ -699,17 +700,10 @@ public class RoadModule extends ConfigurableWorldModule {
 
 			Material surface = getSurfaceForNode(node);
 
-			if (node.getTags().contains("crossing", "zebra")
-					|| node.getTags().contains("crossing_ref", "zebra")) {
+			Material markingMaterial = getMarkingMaterial(node.getTags());
 
-				surface = surface.withAddedLayers(
-						ROAD_MARKING_ZEBRA.getTextureLayers());
-
-			} else if (!node.getTags().contains("crossing", "unmarked")) {
-
-				surface = surface.withAddedLayers(
-						ROAD_MARKING_CROSSING.getTextureLayers());
-
+			if (markingMaterial != null) {
+				surface = surface.withAddedLayers(markingMaterial.getTextureLayers());
 			}
 
 			/* draw crossing */
@@ -732,11 +726,33 @@ public class RoadModule extends ConfigurableWorldModule {
 
 		}
 
+		private static @Nullable Material getMarkingMaterial(TagSet tags) {
+
+			String markingType = tags.getValue("crossing:markings");
+
+			if (markingType == null) {
+				if (tags.contains("crossing", "zebra") || tags.contains("crossing_ref", "zebra")) {
+					markingType = "zebra";
+				} else if (tags.contains("crossing", "unmarked")) {
+					markingType = "no";
+				} else {
+					markingType = "yes";
+				}
+			}
+
+			return switch (markingType) {
+				case "zebra" -> ROAD_MARKING_ZEBRA;
+				case "surface", "no" -> null;
+				default -> ROAD_MARKING_CROSSING;
+			};
+
+		}
+
 	}
 
 	/** representation of a road */
 	public static class Road extends AbstractNetworkWaySegmentWorldObject
-			implements TerrainBoundaryWorldObject, ProceduralWorldObject {
+			implements ProceduralWorldObject {
 
 		protected static final double DEFAULT_LANE_WIDTH = 3.5f;
 
@@ -818,7 +834,7 @@ public class RoadModule extends ConfigurableWorldModule {
 			Double lanes = null;
 
 			if (tags.containsKey("lanes")) {
-				lanes = parseOsmDecimal(tags.getValue("lanes"), false);
+				lanes = parseOsmDecimal(tags.getValue("lanes"), POSITIVE);
 			}
 
 			Double lanesRight = null;
@@ -831,7 +847,7 @@ public class RoadModule extends ConfigurableWorldModule {
 			if (laneTagsRight != null) {
 				lanesRight = (double)laneTagsRight.length;
 			} else if (tags.containsKey(rightKey)) {
-				lanesRight = parseOsmDecimal(tags.getValue(rightKey), false);
+				lanesRight = parseOsmDecimal(tags.getValue(rightKey), POSITIVE);
 			}
 
 			String leftKey = rightHandTraffic ? "lanes:backward" : "lanes:forward";
@@ -839,7 +855,7 @@ public class RoadModule extends ConfigurableWorldModule {
 			if (laneTagsLeft != null) {
 				lanesLeft = (double)laneTagsLeft.length;
 			} else if (tags.containsKey(leftKey)) {
-				lanesLeft = parseOsmDecimal(tags.getValue(leftKey), false);
+				lanesLeft = parseOsmDecimal(tags.getValue(leftKey), POSITIVE);
 			}
 
 			int vehicleLaneCount;
@@ -1283,7 +1299,7 @@ public class RoadModule extends ConfigurableWorldModule {
 		}
 
 		@Override
-		public Collection<PolygonShapeXZ> getTerrainBoundariesXZ() {
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
 			if (isBroken() || getOutlinePolygonXZ() == null) {
 				return emptyList();
 			} else if (steps && attachmentConnectorList.stream().allMatch(c -> c.isAttached())
@@ -1552,14 +1568,14 @@ public class RoadModule extends ConfigurableWorldModule {
 	}
 
 	public static class RoadArea extends NetworkAreaWorldObject
-			implements TerrainBoundaryWorldObject, LegacyWorldObject {
+			implements ProceduralWorldObject {
 
 		public RoadArea(MapArea area) {
 			super(area);
 		}
 
 		@Override
-		public void renderTo(Target target) {
+		public void buildMeshesAndModels(Target target) {
 
 			String surface = area.getTags().getValue("surface");
 			Material material = getSurfaceMaterial(surface, ASPHALT);
@@ -2271,22 +2287,12 @@ public class RoadModule extends ConfigurableWorldModule {
 	 * To reduce the number of necessary textures, it uses mirrored versions of
 	 * the various right-pointing arrows for left-pointing arrows.
 	 */
-	private static class ArrowTexCoordFunction implements TexCoordFunction {
-
-		private final RoadPart roadPart;
-		private final boolean rightHandTraffic;
-		private final boolean mirrorLeftRight;
-		private final TextureDataDimensions textureDimensions;
-
-		private ArrowTexCoordFunction(RoadPart roadPart,
-				boolean rightHandTraffic, boolean mirrorLeftRight, TextureDataDimensions textureDimensions) {
-
-			this.roadPart = roadPart;
-			this.rightHandTraffic = rightHandTraffic;
-			this.mirrorLeftRight = mirrorLeftRight;
-			this.textureDimensions = textureDimensions;
-
-		}
+	private record ArrowTexCoordFunction (
+		RoadPart roadPart,
+		boolean rightHandTraffic,
+		boolean mirrorLeftRight,
+		TextureDataDimensions textureDimensions
+	) implements TexCoordFunction {
 
 		@Override
 		public List<VectorXZ> apply(List<VectorXYZ> vs) {
@@ -2295,7 +2301,7 @@ public class RoadModule extends ConfigurableWorldModule {
 				throw new IllegalArgumentException("not a triangle strip lane");
 			}
 
-			List<VectorXZ> result = new ArrayList<VectorXZ>(vs.size());
+			List<VectorXZ> result = new ArrayList<>(vs.size());
 
 			boolean forward = roadPart == RoadPart.LEFT ^ rightHandTraffic;
 
@@ -2352,16 +2358,17 @@ public class RoadModule extends ConfigurableWorldModule {
 
 				double s, t;
 
-				s = accumulatedLength / textureDimensions.width;
+				s = accumulatedLength / textureDimensions.width();
 
-				if (width > textureDimensions.height) {
-					double padding = ((width / textureDimensions.height) - 1)  / 2;
+				if (width > textureDimensions.height()) {
+					double padding = ((width / textureDimensions.height()) - 1)  / 2;
 					t = higher ? 0 - padding : 1 + padding;
 				} else {
 					t = higher ? 0 : 1;
 				}
 
-				result.add(new VectorXZ(s, t));
+				VectorXZ rawTexCoord = new VectorXZ(s, t);
+				result.add(TexCoordUtil.applyPadding(rawTexCoord, textureDimensions));
 
 			}
 

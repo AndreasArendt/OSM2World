@@ -1,7 +1,11 @@
 package org.osm2world.core.math;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.osm2world.core.math.VectorXYZ.*;
 import static org.osm2world.core.test.TestUtil.assertAlmostEquals;
+
+import java.util.List;
 
 import org.junit.Test;
 
@@ -36,6 +40,13 @@ public class TriangleXYZTest {
 
 		assertAlmostEquals(0.5, t1.getArea());
 
+		TriangleXYZ t2 = new TriangleXYZ(
+				new VectorXYZ(0, 0, 0),
+				new VectorXYZ(1, 0, 0),
+				new VectorXYZ(0, 0, 5));
+
+		assertAlmostEquals(2.5, t2.getArea());
+
 	}
 
 	@Test
@@ -61,6 +72,60 @@ public class TriangleXYZTest {
 				new VectorXYZ(0, 0, 0),
 				new VectorXYZ(0, 0, 0),
 				new VectorXYZ(1, 2, 3));
+
+	}
+
+	@Test
+	public void testSplitTriangleOnLine() {
+
+		var l = new LineXZ(new VectorXZ(0, -10), new VectorXZ(0, +10));
+
+		var t0 = new TriangleXYZ(new VectorXYZ(-2, 0, 0), new VectorXYZ(-1, 0, 0), new VectorXYZ(-1.5, 1, 0));
+		assertEquals(List.of(t0), t0.split(l).stream().toList());
+
+		var t1 = new TriangleXYZ(new VectorXYZ(-1, 0, 0), new VectorXYZ(2, 0, 0), new VectorXYZ(0.5, 1, 0));
+		var result1 = t1.split(l);
+		assertEquals(3, result1.size());
+
+		var t2 = t1.shift(new VectorXYZ(0, 42, 0));
+		var result2 = t2.split(l);
+		assertEquals(3, result2.size());
+
+		var t3 = new TriangleXYZ(new VectorXYZ(-1, 0, 0), new VectorXYZ(+1, 0, 0), new VectorXYZ(0, -1, 0));
+		var result3 = t3.split(l);
+		assertEquals(2, result3.size());
+
+		var t4 = new TriangleXYZ(new VectorXYZ(-1, 0, 0), new VectorXYZ(+1, 0, 0), new VectorXYZ(+1, 10, 0));
+		var result4 = t4.split(l);
+		assertEquals(3, result4.size());
+
+	}
+
+	@Test
+	public void testRotateY_ZeroAngle() {
+		TriangleXYZ triangle = new TriangleXYZ(new VectorXYZ(0, 0, 0), new VectorXYZ(1, 2, 3), new VectorXYZ(4, 5, 6));
+		assertAlmostEquals(triangle, triangle.rotateY(0));
+	}
+
+	@Test
+	public void testRotateY_NonZeroAngle() {
+		var triangle = new TriangleXYZ(new VectorXYZ(0, 0, 0), new VectorXYZ(1, 0, 0), new VectorXYZ(0, 0, 1));
+		var result = triangle.rotateY(Math.PI);
+		assertAlmostEquals(new TriangleXYZ(new VectorXYZ(0, 0, 0), new VectorXYZ(-1, 0, 0), new VectorXYZ(0, 0, -1)), result);
+	}
+
+	@Test
+	public void testRotateY_NegativeAngle() {
+		TriangleXYZ triangle = new TriangleXYZ(new VectorXYZ(0, 0, 0), new VectorXYZ(1, 2, 3), new VectorXYZ(4, 5, 6));
+		var resultTriangle = triangle.rotateY(-Math.PI / 4);
+		assertNotEquals(triangle, resultTriangle);
+	}
+
+	@Test
+	public void testScale() {
+		var triangle = new TriangleXYZ(new VectorXYZ(9, 0, 0), new VectorXYZ(11, 0, 0), new VectorXYZ(10, 1, 1));
+		var result = triangle.scale(new VectorXYZ(10, 0, 0), 2.0);
+		assertAlmostEquals(new TriangleXYZ(new VectorXYZ(8, 0, 0), new VectorXYZ(12, 0, 0), new VectorXYZ(10, 2, 2)), result);
 
 	}
 

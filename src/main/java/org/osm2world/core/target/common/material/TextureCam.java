@@ -1,13 +1,14 @@
 package org.osm2world.core.target.common.material;
 
 import static java.lang.Double.isFinite;
-import static java.lang.Math.PI;
-import static java.util.Arrays.*;
+import static java.lang.Math.*;
+import static java.util.Arrays.asList;
+import static java.util.Arrays.stream;
 import static java.util.Collections.nCopies;
 import static org.osm2world.core.math.GeometryUtil.interpolateOnTriangle;
 import static org.osm2world.core.math.VectorXYZ.*;
 
-import java.awt.Color;
+import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -69,8 +70,7 @@ public class TextureCam {
 	}
 
 	public static final TextureLayer renderTextures(List<Mesh> meshes, ViewDirection viewDirection, String name,
-			double width, double height, Double widthPerEntity, Double heightPerEntity, Wrap wrap,
-			@Nullable VectorXYZ center, double displacementScale) {
+			TextureDataDimensions dimensions, Wrap wrap, @Nullable VectorXYZ center, double displacementScale) {
 
 		List<TriangleWithAttributes> triangles = new ArrayList<>();
 
@@ -154,8 +154,8 @@ public class TextureCam {
 			for (int x = 0; x < res.width; x++) {
 
 				VectorXZ point = new VectorXZ(
-						width * ((x / (double)res.width) - 0.5),
-						height * ((y / (double)res.height) - 0.5) * -1);
+						dimensions.width() * ((x / (double)res.width) - 0.5),
+						dimensions.height() * ((y / (double)res.height) - 0.5) * -1);
 
 				intersectedTriangles.clear();
 
@@ -196,9 +196,11 @@ public class TextureCam {
 					}
 					VectorXYZ geometryNormal = interpolateOnTriangle(point, t.triangle,
 							t.normals.get(0), t.normals.get(1), t.normals.get(2));
-					geometryNormal = new VectorXYZ(geometryNormal.x, geometryNormal.y, -geometryNormal.z);
 					if (viewDirection == ViewDirection.FROM_TOP) {
-						geometryNormal = geometryNormal.rotateVec(PI / 2, NULL_VECTOR, X_UNIT);
+						geometryNormal = geometryNormal.rotateVec(-PI / 2, NULL_VECTOR, X_UNIT);
+						geometryNormal = new VectorXYZ(geometryNormal.x, -geometryNormal.y, -geometryNormal.z);
+					} else {
+						geometryNormal = new VectorXYZ(geometryNormal.x, geometryNormal.y, -geometryNormal.z);
 					}
 					if (geometryNormal.distanceTo(Z_UNIT) > 0.1) {
 						// overwrite texture normal with geometry normal unless it's almost directly facing the camera
@@ -255,17 +257,59 @@ public class TextureCam {
 
 		}
 
+		/* increase occlusion and tweak normals at displacement jumps (currently only vertical+horizontal edges) */
+
+		double jumpThreshold = (maxHeight - minHeight) / 4;
+
+		for (int y = 0; y < res.height; y++) {
+			for (int x = 0; x < res.width; x++) {
+
+				if (x > 0 && displacementHeights[x][y] != null && displacementHeights[x - 1][y] != null) {
+					double jumpHeight = displacementHeights[x][y] - displacementHeights[x - 1][y];
+					double baseStrength = min(0.5 + abs(jumpHeight) * 0.5, 1.0);
+					if (jumpHeight > jumpThreshold) {
+						for (int i = 1; i <= 4; i++) {
+							increaseOcclusion(ormImage, x - i, y, baseStrength - 0.1 * i);
+						}
+						normalImage.setRGB(x, y, colorFromNormal(new VectorXYZ(-1, 0, 0.01).normalize()).toAWT().getRGB());
+					} else if (jumpHeight < -jumpThreshold) {
+						for (int i = 1; i <= 4; i++) {
+							increaseOcclusion(ormImage, x - 1 + i, y, baseStrength - 0.1 * i);
+						}
+						normalImage.setRGB(x - 1, y, colorFromNormal(new VectorXYZ(+1, 0, 0.01).normalize()).toAWT().getRGB());
+					}
+				}
+
+				if (y > 0 && displacementHeights[x][y] != null && displacementHeights[x][y - 1] != null) {
+					double jumpHeight = displacementHeights[x][y] - displacementHeights[x][y - 1];
+					double baseStrength = min(0.5 + abs(jumpHeight) * 0.5, 1.0);
+					if (jumpHeight > jumpThreshold) {
+						for (int i = 1; i <= 4; i++) {
+							increaseOcclusion(ormImage, x, y - i, baseStrength - 0.1 * i);
+						}
+						normalImage.setRGB(x, y, colorFromNormal(new VectorXYZ(0, -1, 0.01).normalize()).toAWT().getRGB());
+					} else if (jumpHeight < -jumpThreshold) {
+						for (int i = 1; i <= 4; i++) {
+							increaseOcclusion(ormImage, x, y - 1 + i, baseStrength - 0.1 * i);
+						}
+						normalImage.setRGB(x, y - 1, colorFromNormal(new VectorXYZ(0, 1, 0.01).normalize()).toAWT().getRGB());
+					}
+				}
+
+			}
+		}
+
 		/* build and return the result */
 
 		return new TextureLayer(
 				new RenderedTexture(colorImage, name + " color",
-						width, height, widthPerEntity, heightPerEntity, wrap, NamedTexCoordFunction.GLOBAL_X_Z),
+						dimensions, wrap, NamedTexCoordFunction.GLOBAL_X_Z),
 				new RenderedTexture(normalImage, name + " normal",
-						width, height, widthPerEntity, heightPerEntity, wrap, NamedTexCoordFunction.GLOBAL_X_Z),
+						dimensions, wrap, NamedTexCoordFunction.GLOBAL_X_Z),
 				new RenderedTexture(ormImage, name + " orm",
-						width, height, widthPerEntity, heightPerEntity, wrap, NamedTexCoordFunction.GLOBAL_X_Z),
+						dimensions, wrap, NamedTexCoordFunction.GLOBAL_X_Z),
 				displacementImage == null ? null : new RenderedTexture(displacementImage, name + " displacement",
-						width, height, widthPerEntity, heightPerEntity, wrap, NamedTexCoordFunction.GLOBAL_X_Z),
+						dimensions, wrap, NamedTexCoordFunction.GLOBAL_X_Z),
 				false);
 
 	}
@@ -320,14 +364,23 @@ public class TextureCam {
 				(float)(normal.z + 1.0) / 2);
 	}
 
+	/** increases the occlusion (red) value in an ORM map unless it's already high */
+	private static void increaseOcclusion(BufferedImage ormImage, int x, int y, double strength) {
+		if (strength < 0 || strength > 1) throw new IllegalArgumentException("invalid strength: " + strength);
+		if (x < 0 || x >= ormImage.getWidth() || y < 0 || y >= ormImage.getHeight()) return;
+		Color c = new Color(ormImage.getRGB(x, y));
+		c = new Color(min((int)(255 * (1 - strength)), c.getRed()), c.getGreen(), c.getBlue());
+		ormImage.setRGB(x, y, c.getRGB());
+	}
+
 	private static final class RenderedTexture extends RuntimeTexture {
 
 		private final BufferedImage image;
 		private final String name;
 
-		public RenderedTexture(BufferedImage image, String name, double width, double height, Double widthPerEntity,
-				Double heightPerEntity, Wrap wrap, Function<TextureDataDimensions, TexCoordFunction> texCoordFunction) {
-			super(width, height, widthPerEntity, heightPerEntity, wrap, texCoordFunction);
+		public RenderedTexture(BufferedImage image, String name, TextureDataDimensions dimensions, Wrap wrap,
+							   Function<TextureDataDimensions, TexCoordFunction> texCoordFunction) {
+			super(dimensions, wrap, texCoordFunction);
 			this.image = image;
 			this.name = name;
 		}

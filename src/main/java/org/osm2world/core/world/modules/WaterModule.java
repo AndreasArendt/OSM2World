@@ -12,6 +12,7 @@ import static org.osm2world.core.world.modules.common.WorldModuleGeometryUtil.cr
 import static org.osm2world.core.world.modules.common.WorldModuleGeometryUtil.createTriangleStripBetween;
 import static org.osm2world.core.world.network.NetworkUtil.getConnectedNetworkSegments;
 
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,12 +23,11 @@ import org.osm2world.core.map_data.data.overlaps.MapOverlapType;
 import org.osm2world.core.map_elevation.creation.EleConstraintEnforcer;
 import org.osm2world.core.map_elevation.data.GroundState;
 import org.osm2world.core.math.*;
+import org.osm2world.core.math.shapes.PolygonShapeXZ;
 import org.osm2world.core.math.shapes.PolylineXZ;
 import org.osm2world.core.math.shapes.ShapeXZ;
-import org.osm2world.core.target.Target;
 import org.osm2world.core.world.data.AbstractAreaWorldObject;
-import org.osm2world.core.world.data.LegacyWorldObject;
-import org.osm2world.core.world.data.TerrainBoundaryWorldObject;
+import org.osm2world.core.world.data.ProceduralWorldObject;
 import org.osm2world.core.world.modules.common.ConfigurableWorldModule;
 import org.osm2world.core.world.modules.common.WorldModuleParseUtil;
 import org.osm2world.core.world.network.AbstractNetworkWaySegmentWorldObject;
@@ -102,7 +102,7 @@ public class WaterModule extends ConfigurableWorldModule {
 	}
 
 	public static class Waterway extends AbstractNetworkWaySegmentWorldObject
-			implements TerrainBoundaryWorldObject, LegacyWorldObject {
+			implements ProceduralWorldObject {
 
 		public Waterway(MapWaySegment line) {
 			super(line);
@@ -145,7 +145,7 @@ public class WaterModule extends ConfigurableWorldModule {
 		}
 
 		@Override
-		public void renderTo(Target target) {
+		public void buildMeshesAndModels(Target target) {
 
 			//note: simply "extending" a river cannot work - unlike streets -
 			//      because there can be islands within the riverbank polygon.
@@ -234,14 +234,14 @@ public class WaterModule extends ConfigurableWorldModule {
 	}
 
 	public static class RiverJunction extends JunctionNodeWorldObject<Waterway>
-			implements TerrainBoundaryWorldObject, LegacyWorldObject {
+			implements ProceduralWorldObject {
 
 		public RiverJunction(MapNode node) {
 			super(node, Waterway.class);
 		}
 
 		@Override
-		public void renderTo(Target target) {
+		public void buildMeshesAndModels(Target target) {
 
 			//TODO: check whether it's within a riverbank (as with Waterway)
 
@@ -257,7 +257,7 @@ public class WaterModule extends ConfigurableWorldModule {
 	}
 
 	public static class Water extends NetworkAreaWorldObject
-			implements TerrainBoundaryWorldObject, LegacyWorldObject {
+			implements ProceduralWorldObject {
 
 		//TODO: only cover with water to 0.95 * distance to center; add land below.
 		// possible algorithm: for each node of the outer polygon, check whether it
@@ -279,7 +279,7 @@ public class WaterModule extends ConfigurableWorldModule {
 		}
 
 		@Override
-		public void renderTo(Target target) {
+		public void buildMeshesAndModels(Target target) {
 			List<TriangleXYZ> triangles = getTriangulation();
 			target.drawTriangles(WATER, triangles,
 					triangleTexCoordLists(triangles, WATER, GLOBAL_X_Z));
@@ -288,7 +288,7 @@ public class WaterModule extends ConfigurableWorldModule {
 	}
 
 	public static class AreaFountain extends AbstractAreaWorldObject
-			implements TerrainBoundaryWorldObject, LegacyWorldObject {
+			implements ProceduralWorldObject {
 
 		public AreaFountain(MapArea area) {
 			super(area);
@@ -300,31 +300,38 @@ public class WaterModule extends ConfigurableWorldModule {
 		}
 
 		@Override
-		public void renderTo(Target target) {
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
+			return List.of(getOutlinePolygonXZ());
+		}
+
+		@Override
+		public void buildMeshesAndModels(Target target) {
 
 			/* render water */
 
 			List<TriangleXYZ> triangles = getTriangulation();
-			target.drawTriangles(PURIFIED_WATER, triangles,
-					triangleTexCoordLists(triangles, PURIFIED_WATER, GLOBAL_X_Z));
+			target.drawTriangles(WATER, triangles,
+					triangleTexCoordLists(triangles, WATER, GLOBAL_X_Z));
 
 			/* render walls */
 
 			double width=0.1;
 			double height=0.5;
 
-			ShapeXZ wallShape = new PolylineXZ(
-					new VectorXZ(+width/2, 0),
-					new VectorXZ(+width/2, height),
-					new VectorXZ(-width/2, height),
-					new VectorXZ(-width/2, 0)
-			);
+			for (PolygonXYZ ring : getOutlinePolygon().rings()) {
 
-			List<VectorXYZ> path = getOutlinePolygon().vertices();
+				ShapeXZ wallShape = new PolylineXZ(
+						new VectorXZ(+width / 2, 0),
+						new VectorXZ(+width / 2, height),
+						new VectorXZ(-width / 2, height),
+						new VectorXZ(-width / 2, 0)
+				);
 
-			target.drawExtrudedShape(CONCRETE, wallShape, path,
-					nCopies(path.size(), Y_UNIT), null, null, null);
+				target.drawExtrudedShape(CONCRETE, wallShape, ring.vertices(),
+						nCopies(ring.vertices().size(), Y_UNIT), null, null, null);
 
+			}
+			
 		}
 
 	}

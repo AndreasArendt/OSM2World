@@ -16,6 +16,7 @@ import java.util.*;
 import javax.annotation.Nullable;
 
 import org.apache.commons.io.FilenameUtils;
+import org.osm2world.core.GlobalValues;
 import org.osm2world.core.map_data.data.MapRelation;
 import org.osm2world.core.map_data.data.TagSet;
 import org.osm2world.core.math.TriangleXYZ;
@@ -48,8 +49,6 @@ import org.osm2world.core.util.color.LColor;
 import com.google.common.collect.Multimap;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonIOException;
-
-import jakarta.xml.bind.DatatypeConverter;
 
 /**
  * builds a glTF or glb (binary glTF) output file
@@ -228,7 +227,7 @@ public class GltfTarget extends MeshTarget {
 			case GLTF -> {
 
 				String dataUri = "data:application/gltf-buffer;base64,"
-						+ DatatypeConverter.printBase64Binary(byteBuffer.array());
+						+ Base64.getEncoder().encodeToString(byteBuffer.array());
 
 				GltfBuffer buffer = new GltfBuffer(byteBuffer.capacity());
 				buffer.uri = dataUri;
@@ -317,6 +316,8 @@ public class GltfTarget extends MeshTarget {
 		if (textureIndexMap.containsKey(textureData)) return textureIndexMap.get(textureData);
 
 		GltfSampler sampler = new GltfSampler();
+		sampler.magFilter = GltfSampler.LINEAR;
+		sampler.minFilter = GltfSampler.LINEAR_MIPMAP_LINEAR;
 		switch (textureData.wrap) {
 			case CLAMP -> {
 				sampler.wrapS = GltfSampler.WRAP_CLAMP_TO_EDGE;
@@ -388,13 +389,14 @@ public class GltfTarget extends MeshTarget {
 
 		List<MeshProcessingStep> processingSteps = new ArrayList<>(asList(
 				new FilterLod(lod),
+				new ConvertToTriangles(lod),
 				new EmulateTextureLayers(lod.ordinal() <= 1 ? 1 : Integer.MAX_VALUE),
 				new MoveColorsToVertices(), // after EmulateTextureLayers because colorable is per layer
 				new ReplaceTexturesWithAtlas(t -> getResourceOutputSettings().modeForTexture(t) == REFERENCE),
 				new MergeMeshes(mergeOptions)));
 
 		if (clipToBounds && bounds != null) {
-			processingSteps.add(1, new ClipToBounds(bounds));
+			processingSteps.add(1, new ClipToBounds(bounds, true));
 		}
 
 		MeshStore processedMeshStore = meshStore.process(processingSteps);
@@ -404,6 +406,8 @@ public class GltfTarget extends MeshTarget {
 		/* create the basic structure of the glTF */
 
 		gltf.asset = new GltfAsset();
+		gltf.asset.version = "2.0";
+		gltf.asset.generator = "OSM2World " + GlobalValues.VERSION_STRING;
 
 		gltf.scene = 0;
 		gltf.scenes = List.of(new GltfScene());
@@ -581,15 +585,17 @@ public class GltfTarget extends MeshTarget {
 		}
 	}
 
-	private @Nullable String getMaterialName(Material m, TextureLayer textureLayer) {
+	private @Nullable String getMaterialName(Material m, @Nullable TextureLayer textureLayer) {
 
 		String name = Materials.getUniqueName(m);
 
 		if (name == null) {
-			if (textureLayer.toString().startsWith("TextureAtlas")) {
-				name = "TextureAtlas " + Integer.toHexString(m.hashCode());
-			} else if (!textureLayer.toString().contains(",")) {
-				name = textureLayer.toString();
+			if (textureLayer != null) {
+				if (textureLayer.toString().startsWith("TextureAtlas")) {
+					name = "TextureAtlas " + Integer.toHexString(m.hashCode());
+				} else if (!textureLayer.toString().contains(",")) {
+					name = textureLayer.toString();
+				}
 			}
 		} else if (textureLayer != null && m.getNumTextureLayers() > 1) {
 			name += "_layer" + m.getTextureLayers().indexOf(textureLayer);

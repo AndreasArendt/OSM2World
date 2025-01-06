@@ -14,8 +14,10 @@ import static org.osm2world.core.target.common.ExtrudeOption.END_CAP;
 import static org.osm2world.core.target.common.ExtrudeOption.START_CAP;
 import static org.osm2world.core.target.common.material.Materials.*;
 import static org.osm2world.core.target.common.mesh.LevelOfDetail.*;
+import static org.osm2world.core.target.common.texcoord.NamedTexCoordFunction.GLOBAL_X_Z;
 import static org.osm2world.core.target.common.texcoord.NamedTexCoordFunction.STRIP_WALL;
 import static org.osm2world.core.target.common.texcoord.TexCoordUtil.texCoordLists;
+import static org.osm2world.core.target.common.texcoord.TexCoordUtil.triangleTexCoordLists;
 import static org.osm2world.core.util.ValueParseUtil.parseColor;
 import static org.osm2world.core.util.color.ColorNameDefinitions.CSS_COLORS;
 import static org.osm2world.core.world.modules.common.WorldModuleGeometryUtil.createTriangleStripBetween;
@@ -33,10 +35,7 @@ import org.osm2world.core.map_data.data.MapWaySegment;
 import org.osm2world.core.map_data.data.TagSet;
 import org.osm2world.core.map_elevation.data.GroundState;
 import org.osm2world.core.math.*;
-import org.osm2world.core.math.shapes.CircleXZ;
-import org.osm2world.core.math.shapes.PolylineXZ;
-import org.osm2world.core.math.shapes.ShapeXZ;
-import org.osm2world.core.math.shapes.SimpleClosedShapeXZ;
+import org.osm2world.core.math.shapes.*;
 import org.osm2world.core.target.common.material.Material;
 import org.osm2world.core.target.common.material.Materials;
 import org.osm2world.core.target.common.mesh.ExtrusionGeometry;
@@ -52,8 +51,6 @@ import org.osm2world.core.world.data.NodeModelInstance;
 import org.osm2world.core.world.data.ProceduralWorldObject;
 import org.osm2world.core.world.modules.common.AbstractModule;
 import org.osm2world.core.world.network.AbstractNetworkWaySegmentWorldObject;
-
-import com.google.common.collect.Lists;
 
 /**
  * adds barriers to the world
@@ -182,11 +179,20 @@ public class BarrierModule extends AbstractModule {
 
 			target.setCurrentLodRange(minLod, LOD4);
 
+
 			List<VectorXYZ> leftBottomOutline = getOutline(false);
 			List<VectorXYZ> leftTopOutline = addYList(leftBottomOutline, height);
 
 			List<VectorXYZ> rightBottomOutline = getOutline(true);
 			List<VectorXYZ> rightTopOutline = addYList(rightBottomOutline, height);
+
+			/* define the base ele function */
+
+			Function<VectorXZ, Double> baseEleFunction = (VectorXZ point) -> {
+				PolylineXZ centerlineXZ = new PolylineXZ(getCenterlineXZ());
+				double ratio = centerlineXZ.offsetOf(centerlineXZ.closestPoint(point));
+				return GeometryUtil.interpolateOn(getCenterline(), ratio).y;
+			};
 
 			/* close the wall at the end if necessary */
 
@@ -224,6 +230,8 @@ public class BarrierModule extends AbstractModule {
 
 			/* draw the sides of the wall */
 
+			target.setCurrentAttachmentTypes(baseEleFunction, "wall");
+
 			reverse(leftTopOutline);
 			reverse(leftBottomOutline);
 
@@ -232,44 +240,6 @@ public class BarrierModule extends AbstractModule {
 
 			List<VectorXYZ> rightVs = createTriangleStripBetween(rightTopOutline, rightBottomOutline);
 			target.drawTriangleStrip(material, rightVs, texCoordLists(rightVs, material, STRIP_WALL));
-
-		}
-
-		@Override
-		public Collection<AttachmentSurface> getAttachmentSurfaces() {
-
-			/* define the base ele function */
-
-			Function<VectorXZ, Double> baseEleFunction = (VectorXZ point) -> {
-				PolylineXZ centerlineXZ = new PolylineXZ(getCenterlineXZ());
-				double ratio = centerlineXZ.offsetOf(centerlineXZ.closestPoint(point));
-				return GeometryUtil.interpolateOn(getCenterline(), ratio).y;
-			};
-
-			/* return the sides of the wall as attachment surfaces */
-
-			//TODO avoid copypasted code from renderTo
-
-			List<VectorXYZ> leftBottomOutline = getOutline(false);
-			List<VectorXYZ> leftTopOutline = addYList(leftBottomOutline, height);
-
-			List<VectorXYZ> rightBottomOutline = getOutline(true);
-			List<VectorXYZ> rightTopOutline = addYList(rightBottomOutline, height);
-
-			reverse(leftTopOutline);
-			reverse(leftBottomOutline);
-
-			AttachmentSurface.Builder leftBuilder = new AttachmentSurface.Builder("wall");
-			List<VectorXYZ> leftVs = createTriangleStripBetween(leftTopOutline, leftBottomOutline);
-			leftBuilder.drawTriangleStrip(material, leftVs, texCoordLists(leftVs, material, STRIP_WALL));
-			leftBuilder.setBaseEleFunction(baseEleFunction);
-
-			AttachmentSurface.Builder rightBuilder = new AttachmentSurface.Builder("wall");
-			List<VectorXYZ> rightVs = createTriangleStripBetween(rightTopOutline, rightBottomOutline);
-			rightBuilder.drawTriangleStrip(material, rightVs, texCoordLists(rightVs, material, STRIP_WALL));
-			rightBuilder.setBaseEleFunction(baseEleFunction);
-
-			return asList(leftBuilder.build(), rightBuilder.build());
 
 		}
 
@@ -410,6 +380,11 @@ public class BarrierModule extends AbstractModule {
 
 		}
 
+		@Override
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
+			return emptyList();
+		}
+
 	}
 
 	public static class Balustrade extends LinearBarrier {
@@ -535,6 +510,12 @@ public class BarrierModule extends AbstractModule {
 			}
 
 		}
+
+		@Override
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
+			return emptyList();
+		}
+
 	}
 
 	public static class PoleFence extends LinearBarrier {
@@ -615,6 +596,12 @@ public class BarrierModule extends AbstractModule {
 			}
 
 		}
+
+		@Override
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
+			return emptyList();
+		}
+
 	}
 
 	public static class TrellisWorkFence extends LinearBarrier {
@@ -681,6 +668,11 @@ public class BarrierModule extends AbstractModule {
 
 			}
 
+		}
+
+		@Override
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
+			return emptyList();
 		}
 
 	}
@@ -783,12 +775,7 @@ public class BarrierModule extends AbstractModule {
 
 			List<VectorXYZ> path = addYList(centerline, this.height - SHAPE_GERMAN_B_HEIGHT);
 
-			//front
-			target.drawExtrudedShape(material, SHAPE_GERMAN_B,
-					path, nCopies(path.size(), Y_UNIT), null, null, null);
-
-			//back
-			target.drawExtrudedShape(material, new PolylineXZ(Lists.reverse(SHAPE_GERMAN_B.vertices())),
+			target.drawExtrudedShape(material.makeDoubleSided(), SHAPE_GERMAN_B,
 					path, nCopies(path.size(), Y_UNIT), null, null, null);
 
 			/* add posts */
@@ -832,6 +819,11 @@ public class BarrierModule extends AbstractModule {
 
 			}
 
+		}
+
+		@Override
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
+			return emptyList();
 		}
 
 	}
@@ -891,6 +883,11 @@ public class BarrierModule extends AbstractModule {
 
 		}
 
+		@Override
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
+			return emptyList();
+		}
+
 	}
 
 	public static class BollardRow extends AbstractNetworkWaySegmentWorldObject {
@@ -930,6 +927,11 @@ public class BarrierModule extends AbstractModule {
 		@Override
 		public double getWidth() {
 			return 0.15;
+		}
+
+		@Override
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
+			return emptyList();
 		}
 
 	}
@@ -1212,9 +1214,15 @@ public class BarrierModule extends AbstractModule {
 			switch (shape) {
 			case BOX:
 				target.setCurrentLodRange(LOD2, LOD4);
-				target.drawExtrudedShape(HEDGE, getOutlinePolygonXZ(),
-						asList(new VectorXYZ(0, 0, 0), new VectorXYZ(0, height, 0)),
-						null, null, null, EnumSet.of(END_CAP));
+				List<TriangleXYZ> topTriangles = getTriangulation().stream()
+						.map(t -> t.shift(new VectorXYZ(0, height, 0)))
+						.toList();
+				target.drawTriangles(HEDGE, topTriangles, triangleTexCoordLists(topTriangles, HEDGE, GLOBAL_X_Z));
+				for (PolygonXYZ ring : getOutlinePolygon().rings()) {
+					List<VectorXYZ> outerStrip = createTriangleStripBetween(
+							addYList(ring.vertices(), height), ring.vertices());
+					target.drawTriangleStrip(HEDGE, outerStrip, texCoordLists(outerStrip, HEDGE, STRIP_WALL));
+				}
 				break;
 			}
 		}

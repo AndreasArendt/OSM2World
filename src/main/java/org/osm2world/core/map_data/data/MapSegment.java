@@ -1,17 +1,22 @@
 package org.osm2world.core.map_data.data;
 
-import com.google.common.collect.ImmutableList;
+import static org.osm2world.core.math.AxisAlignedRectangleXZ.bbox;
+
+import java.util.List;
+
+import org.osm2world.core.math.AxisAlignedRectangleXZ;
+import org.osm2world.core.math.BoundedObject;
 import org.osm2world.core.math.LineSegmentXZ;
 import org.osm2world.core.math.VectorXZ;
 
-import java.util.List;
+import com.google.common.collect.ImmutableList;
 
 /**
  * connection between two {@link MapNode}s that's part of a polyline or polygon.
  *
  * @see MapData
  */
-public abstract class MapSegment {
+public abstract class MapSegment implements BoundedObject {
 
 	protected final MapNode startNode;
 	protected final MapNode endNode;
@@ -112,6 +117,22 @@ public abstract class MapSegment {
 				&& startNode == other.getEndNode())
 			|| (endNode == other.getEndNode()
 				&& startNode == other.getStartNode());
+	}
+
+	/** returns the {@link MapElement} a segment is part of */
+	public static MapElement getElement(MapSegment s) {
+		if (s instanceof MapWaySegment w) {
+			return w;
+		} else if (s instanceof MapAreaSegment a) {
+			return a.getArea();
+		} else {
+			throw new Error("segment must be part of a way or area");
+		}
+	}
+
+	@Override
+	public AxisAlignedRectangleXZ boundingBox() {
+		return bbox(List.of(getStartNode().getPos(), getEndNode().getPos()));
 	}
 
 }

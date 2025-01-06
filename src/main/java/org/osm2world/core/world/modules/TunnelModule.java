@@ -10,7 +10,10 @@ import static org.osm2world.core.target.common.texcoord.TexCoordUtil.texCoordLis
 import static org.osm2world.core.world.modules.common.WorldModuleGeometryUtil.createTriangleStripBetween;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+
+import javax.annotation.Nonnull;
 
 import org.osm2world.core.map_data.data.*;
 import org.osm2world.core.map_elevation.creation.EleConstraintEnforcer;
@@ -20,11 +23,10 @@ import org.osm2world.core.map_elevation.data.GroundState;
 import org.osm2world.core.math.SimplePolygonXZ;
 import org.osm2world.core.math.VectorXYZ;
 import org.osm2world.core.math.VectorXZ;
-import org.osm2world.core.target.Target;
+import org.osm2world.core.math.shapes.PolygonShapeXZ;
 import org.osm2world.core.target.common.mesh.Mesh;
-import org.osm2world.core.world.data.LegacyWorldObject;
 import org.osm2world.core.world.data.NodeWorldObject;
-import org.osm2world.core.world.data.TerrainBoundaryWorldObject;
+import org.osm2world.core.world.data.ProceduralWorldObject;
 import org.osm2world.core.world.data.WaySegmentWorldObject;
 import org.osm2world.core.world.modules.common.AbstractModule;
 import org.osm2world.core.world.modules.common.BridgeOrTunnel;
@@ -135,7 +137,7 @@ public class TunnelModule extends AbstractModule {
 		}
 
 		@Override
-		public void renderTo(Target target) {
+		public void buildMeshesAndModels(Target target) {
 
 			List<VectorXYZ> leftOutline = primaryRep.getOutline(false);
 			List<VectorXYZ> rightOutline = primaryRep.getOutline(true);
@@ -174,7 +176,7 @@ public class TunnelModule extends AbstractModule {
 
 	}
 
-	public static class TunnelEntrance implements NodeWorldObject, TerrainBoundaryWorldObject {
+	public static class TunnelEntrance implements NodeWorldObject {
 
 		private final MapNode node;
 		private final AbstractNetworkWaySegmentWorldObject tunnelContent;
@@ -287,12 +289,17 @@ public class TunnelModule extends AbstractModule {
 		}
 
 		@Override
-		public SimplePolygonXZ getOutlinePolygonXZ() {
+		public @Nonnull SimplePolygonXZ getOutlinePolygonXZ() {
 
 			calculateOutlineIfNecessary();
 
 			return outline;
 
+		}
+
+		@Override
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
+			return List.of(getOutlinePolygonXZ());
 		}
 
 		@Override
@@ -303,7 +310,7 @@ public class TunnelModule extends AbstractModule {
 
 	}
 
-	public static class TunnelJunction implements NodeWorldObject, LegacyWorldObject {
+	public static class TunnelJunction implements NodeWorldObject, ProceduralWorldObject {
 
 		private final MapNode node;
 		private final JunctionNodeWorldObject<?> primaryRep;
@@ -333,7 +340,7 @@ public class TunnelModule extends AbstractModule {
 		public void defineEleConstraints(EleConstraintEnforcer enforcer) {}
 
 		@Override
-		public void renderTo(Target target) {
+		public void buildMeshesAndModels(Target target) {
 
 			//TODO port to new elevation model
 

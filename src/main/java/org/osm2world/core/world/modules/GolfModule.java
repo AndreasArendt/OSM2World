@@ -10,12 +10,13 @@ import static org.osm2world.core.math.algorithms.TriangulationUtil.triangulate;
 import static org.osm2world.core.math.algorithms.TriangulationUtil.triangulationXZtoXYZ;
 import static org.osm2world.core.target.common.material.Materials.PLASTIC;
 import static org.osm2world.core.target.common.material.Materials.SAND;
+import static org.osm2world.core.target.common.mesh.LevelOfDetail.*;
 import static org.osm2world.core.target.common.texcoord.NamedTexCoordFunction.GLOBAL_X_Z;
 import static org.osm2world.core.target.common.texcoord.NamedTexCoordFunction.STRIP_WALL;
 import static org.osm2world.core.target.common.texcoord.TexCoordUtil.texCoordLists;
 import static org.osm2world.core.target.common.texcoord.TexCoordUtil.triangleTexCoordLists;
 import static org.osm2world.core.world.modules.common.WorldModuleGeometryUtil.createTriangleStripBetween;
-import static org.osm2world.core.world.modules.common.WorldModuleGeometryUtil.trianguateAreaBetween;
+import static org.osm2world.core.world.modules.common.WorldModuleGeometryUtil.triangulateAreaBetween;
 
 import java.awt.*;
 import java.util.ArrayList;
@@ -33,12 +34,11 @@ import org.osm2world.core.math.*;
 import org.osm2world.core.math.algorithms.JTSBufferUtil;
 import org.osm2world.core.math.algorithms.TriangulationUtil;
 import org.osm2world.core.math.shapes.CircleXZ;
-import org.osm2world.core.target.Target;
+import org.osm2world.core.math.shapes.PolygonShapeXZ;
 import org.osm2world.core.target.common.material.Material;
 import org.osm2world.core.target.common.material.Materials;
 import org.osm2world.core.world.data.AbstractAreaWorldObject;
-import org.osm2world.core.world.data.LegacyWorldObject;
-import org.osm2world.core.world.data.TerrainBoundaryWorldObject;
+import org.osm2world.core.world.data.ProceduralWorldObject;
 import org.osm2world.core.world.modules.StreetFurnitureModule.Flagpole.StripedFlag;
 import org.osm2world.core.world.modules.SurfaceAreaModule.SurfaceArea;
 import org.osm2world.core.world.modules.common.AbstractModule;
@@ -95,8 +95,7 @@ public class GolfModule extends AbstractModule {
 
 	}
 
-	private static class Bunker extends AbstractAreaWorldObject
-			implements TerrainBoundaryWorldObject, LegacyWorldObject {
+	private static class Bunker extends AbstractAreaWorldObject implements ProceduralWorldObject {
 
 		public Bunker(MapArea area) {
 			super(area);
@@ -108,13 +107,28 @@ public class GolfModule extends AbstractModule {
 		}
 
 		@Override
-		public void renderTo(Target target) {
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
+			return List.of(getOutlinePolygonXZ());
+		}
+
+		@Override
+		public void buildMeshesAndModels(Target target) {
+
+			/* triangulate the bunker's area normally at low LOD */
+
+			target.setCurrentLodRange(LOD0, LOD1);
+
+			List<TriangleXYZ> basicTriangulation = getTriangulation();
+			target.drawTriangles(SAND, basicTriangulation,
+					triangleTexCoordLists(basicTriangulation, SAND, GLOBAL_X_Z));
 
 			/* draw the bunker as a depression by shrinking the outline polygon and lowering it at each step.
 			 *
 			 * The first step gets special handling and is primarily intended for bunkers in uneven terrain.
 			 * It involves an almost vertical drop towards the lowest point of the bunker outline
 			 * that is textured with ground, not sand. */
+
+			target.setCurrentLodRange(LOD2, LOD4);
 
 			List<TriangleXYZ> resultingTriangulation = new ArrayList<>();
 
@@ -147,7 +161,7 @@ public class GolfModule extends AbstractModule {
 
 					};
 
-					Collection<TriangleXZ> triangulationXZ = trianguateAreaBetween(large, small);
+					Collection<TriangleXZ> triangulationXZ = triangulateAreaBetween(large, small);
 
 					triangulationXZ.stream()
 							.map(t -> t.xyz(xyzFunction))
@@ -180,8 +194,7 @@ public class GolfModule extends AbstractModule {
 
 	}
 
-	private static class Green extends AbstractAreaWorldObject
-			implements TerrainBoundaryWorldObject, LegacyWorldObject {
+	private static class Green extends AbstractAreaWorldObject implements ProceduralWorldObject {
 
 		private final VectorXZ pinPosition;
 		private final SimplePolygonXZ pinHoleLoop;
@@ -224,7 +237,9 @@ public class GolfModule extends AbstractModule {
 
 			/* create circle around the hole */
 
-			pinHoleLoop = new SimplePolygonXZ(new CircleXZ(pinPosition, HOLE_RADIUS).vertices(HOLE_CIRCLE_VERTICES));
+			pinHoleLoop = new SimplePolygonXZ(new CircleXZ(pinPosition, HOLE_RADIUS)
+					.vertices(HOLE_CIRCLE_VERTICES))
+					.makeCounterclockwise();
 
 			pinConnectors = new EleConnectorGroup();
 			pinConnectors.addConnectorsFor(pinHoleLoop.getVertexCollection(), area, GroundState.ON);
@@ -234,6 +249,11 @@ public class GolfModule extends AbstractModule {
 		@Override
 		public GroundState getGroundState() {
 			return GroundState.ON;
+		}
+
+		@Override
+		public Collection<PolygonShapeXZ> getRawGroundFootprint() {
+			return List.of(getOutlinePolygonXZ());
 		}
 
 		@Override
@@ -250,7 +270,7 @@ public class GolfModule extends AbstractModule {
 		}
 
 		@Override
-		public void renderTo(Target target) {
+		public void buildMeshesAndModels(Target target) {
 
 			/* render green surface */
 
@@ -269,6 +289,8 @@ public class GolfModule extends AbstractModule {
 					triangleTexCoordLists(triangles , material, GLOBAL_X_Z));
 
 			/* render pin */
+
+			target.setCurrentLodRange(LOD3, LOD4);
 
 			PolygonXYZ upperHoleRing = pinConnectors.getPosXYZ(pinHoleLoop);
 
@@ -292,7 +314,7 @@ public class GolfModule extends AbstractModule {
 
 			List<VectorXYZ> lowerHoleRing = upperHoleRing.stream().map(v -> v.y(holeBottomEle)).collect(toList());
 
-			List<VectorXYZ> vs = createTriangleStripBetween(upperHoleRing, lowerHoleRing);
+			List<VectorXYZ> vs = createTriangleStripBetween(lowerHoleRing, upperHoleRing);
 
 			Material groundMaterial = Materials.EARTH.makeSmooth();
 
@@ -300,7 +322,7 @@ public class GolfModule extends AbstractModule {
 					texCoordLists(vs, groundMaterial, STRIP_WALL));
 
 			target.drawConvexPolygon(groundMaterial, lowerHoleRing,
-					texCoordLists(vs, groundMaterial, GLOBAL_X_Z));
+					texCoordLists(lowerHoleRing, groundMaterial, GLOBAL_X_Z));
 
 			/* draw pole and flag */
 
@@ -308,7 +330,7 @@ public class GolfModule extends AbstractModule {
 			target.drawColumn(flagPoleMaterial, null,
 					pos.xyz(holeBottomEle), 1.5, 0.007, 0.007, false, true);
 
-			StripedFlag flag = new StripedFlag(3 / 4, asList(YELLOW), true);
+			var flag = new StripedFlag(3.0 / 4, List.of(YELLOW), true);
 			flag.renderFlag(target, pos.xyz(holeBottomEle + 1.5), 0.3, 0.4);
 
 		}

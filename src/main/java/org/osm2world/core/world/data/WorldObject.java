@@ -11,14 +11,13 @@ import javax.annotation.Nullable;
 
 import org.osm2world.core.map_data.data.MapElement;
 import org.osm2world.core.map_data.data.overlaps.MapOverlap;
-import org.osm2world.core.map_data.data.overlaps.MapOverlapType;
 import org.osm2world.core.map_elevation.creation.EleConstraintEnforcer;
 import org.osm2world.core.map_elevation.data.EleConnector;
 import org.osm2world.core.map_elevation.data.GroundState;
+import org.osm2world.core.math.InvalidGeometryException;
 import org.osm2world.core.math.algorithms.CAGUtil;
 import org.osm2world.core.math.shapes.PolygonShapeXZ;
 import org.osm2world.core.math.shapes.SimplePolygonShapeXZ;
-import org.osm2world.core.target.Renderable;
 import org.osm2world.core.target.common.mesh.Mesh;
 import org.osm2world.core.target.common.model.Model;
 import org.osm2world.core.target.common.model.ModelInstance;
@@ -37,7 +36,7 @@ public interface WorldObject {
 	 */
 	public default List<Mesh> buildMeshesForModelHierarchy() {
 		List<Mesh> result = new ArrayList<>(buildMeshes());
-		getSubModels().forEach(it -> result.addAll(it.model.buildMeshes(it.params)));
+		getSubModels().forEach(it -> result.addAll(it.getMeshes()));
 		return result;
 	}
 
@@ -51,7 +50,7 @@ public interface WorldObject {
 	/**
 	 * returns another world object this is part of, if any (e.g. a room is part of a building).
 	 * Parents are responsible for rendering their children, so only root objects (those returning null here)
-	 * will have their {@link Renderable#renderTo(org.osm2world.core.target.Target)} methods called.
+	 * will have their {@link #buildMeshes()} and {@link #getSubModels()} methods called directly.
 	 */
 	public default @Nullable WorldObject getParent() { return null; }
 
@@ -114,13 +113,14 @@ public interface WorldObject {
 	}
 
 	/**
-	 * returns a list of polygons defining an object's ground footprint in the xz plane.
-	 * This area will not be covered by terrain (i.e. it will be a "hole" in the terrain surface)
-	 * or by other objects with a lower {@link #getOverlapPriority()}
+	 * returns a list of polygons defining an object's raw ground footprint in the xz plane.
+	 * The "ground" is most commonly the terrain, but could also be a different surface, such as a roof or bridge.
+	 * The true ground footprint, {@link #getGroundFootprint()}, may be smaller if other areas have a higher
+	 * {@link #getOverlapPriority()}.
 	 *
-	 * @return collection of outline polygons, empty list if the world object doesn't cover any area
+	 * @return collection of outline polygons, empty if the world object doesn't cover any area
 	 */
-	public default Collection<PolygonShapeXZ> getTerrainBoundariesXZ() {
+	public default Collection<PolygonShapeXZ> getRawGroundFootprint() {
 		return emptyList();
 	}
 
@@ -154,7 +154,7 @@ public interface WorldObject {
 			return emptyList();
 		} else if (getOverlapPriority() == Integer.MAX_VALUE) {
 			// this has the highest possible priority, nothing will be subtracted
-			return getTerrainBoundariesXZ();
+			return List.of(getOutlinePolygonXZ());
 		}
 
 		SimplePolygonShapeXZ outerPoly = getOutlinePolygonXZ().getOuter();
@@ -174,13 +174,11 @@ public interface WorldObject {
 
 				if (bothOnGround && otherWO.getOverlapPriority() > this.getOverlapPriority()) {
 
-					if (overlap.type == MapOverlapType.CONTAIN
-							&& overlap.e1 == getPrimaryMapElement()) {
-						// completely within other element, no ground area left
-						return emptyList();
+					try {
+						subtractPolys.addAll(otherWO.getRawGroundFootprint());
+					} catch (InvalidGeometryException ignored) {
+						// Prevent errors in other objects from affecting this object
 					}
-
-					subtractPolys.addAll(otherWO.getTerrainBoundariesXZ());
 
 				}
 
@@ -191,7 +189,7 @@ public interface WorldObject {
 		/* create "leftover" polygons by subtracting the existing ones */
 
 		if (subtractPolys.isEmpty()) {
-			return getTerrainBoundariesXZ();
+			return getRawGroundFootprint();
 		} else {
 			return new ArrayList<>(CAGUtil.subtractPolygons(outerPoly, subtractPolys));
 		}

@@ -22,8 +22,7 @@ import org.osm2world.core.target.common.mesh.ExtrusionGeometry;
 import org.osm2world.core.target.common.mesh.Mesh;
 import org.osm2world.core.target.common.mesh.MeshUtil;
 import org.osm2world.core.target.common.mesh.TriangleGeometry;
-import org.osm2world.core.target.common.model.InstanceParameters;
-import org.osm2world.core.target.common.model.Model;
+import org.osm2world.core.target.common.model.ModelInstance;
 import org.osm2world.core.world.data.ProceduralWorldObject;
 
 /**
@@ -93,6 +92,12 @@ public interface CommonTarget {
 	 */
 	default void drawConvexPolygon(@Nonnull Material material, @Nonnull List<VectorXYZ> vs,
 								   @Nonnull List<List<VectorXZ>> texCoordLists) {
+		if (Objects.equals(vs.get(0), vs.get(vs.size() - 1))) {
+			vs = vs.subList(0, vs.size() - 1);
+			texCoordLists = texCoordLists.stream()
+					.map(tcl -> tcl.subList(0, tcl.size() - 1))
+					.toList();
+		}
 		drawTriangleFan(material, vs, texCoordLists);
 	}
 
@@ -209,8 +214,8 @@ public interface CommonTarget {
 	/**
 	 * draws an instanced model.
 	 */
-	default void drawModel(Model model, InstanceParameters params) {
-		model.render(this, params);
+	default void drawModel(ModelInstance modelInstance) {
+		modelInstance.render(this);
 	}
 
 	void drawMesh(Mesh mesh);

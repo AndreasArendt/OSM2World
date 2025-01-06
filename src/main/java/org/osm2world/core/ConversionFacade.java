@@ -9,14 +9,19 @@ import static org.osm2world.core.math.AxisAlignedRectangleXZ.bbox;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 import javax.annotation.Nullable;
 
 import org.apache.commons.configuration.BaseConfiguration;
 import org.apache.commons.configuration.Configuration;
+import org.osm2world.core.conversion.ConversionLog;
 import org.osm2world.core.map_data.creation.LatLon;
 import org.osm2world.core.map_data.creation.MapProjection;
 import org.osm2world.core.map_data.creation.MetricMapProjection;
@@ -25,7 +30,7 @@ import org.osm2world.core.map_data.data.MapData;
 import org.osm2world.core.map_data.data.MapMetadata;
 import org.osm2world.core.map_elevation.creation.*;
 import org.osm2world.core.map_elevation.data.EleConnector;
-import org.osm2world.core.math.FaceXYZ;
+import org.osm2world.core.math.FlatSimplePolygonShapeXYZ;
 import org.osm2world.core.math.VectorXYZ;
 import org.osm2world.core.math.datastructures.IndexGrid;
 import org.osm2world.core.math.datastructures.SpatialIndex;
@@ -35,6 +40,8 @@ import org.osm2world.core.osm.data.OSMData;
 import org.osm2world.core.target.Target;
 import org.osm2world.core.target.TargetUtil;
 import org.osm2world.core.target.common.material.Materials;
+import org.osm2world.core.target.common.model.Models;
+import org.osm2world.core.util.ConfigUtil;
 import org.osm2world.core.util.FaultTolerantIterationUtil;
 import org.osm2world.core.util.functions.Factory;
 import org.osm2world.core.world.attachment.AttachmentConnector;
@@ -89,40 +96,43 @@ public class ConversionFacade {
 	/**
 	 * generates a default list of modules for the conversion
 	 */
-	static final List<WorldModule> createDefaultModuleList() {
+	static final List<WorldModule> createDefaultModuleList(Configuration config) {
 
-		return Arrays.asList((WorldModule)
-				new RoadModule(),
-				new RailwayModule(),
-				new AerowayModule(),
-				new BuildingModule(),
-				new ParkingModule(),
-				new TreeModule(),
-				new StreetFurnitureModule(),
-				new TrafficSignModule(),
-				new BicycleParkingModule(),
-				new WaterModule(),
-				new PoolModule(),
-				new GolfModule(),
-				new SportsModule(),
-				new CliffModule(),
-				new BarrierModule(),
-				new PowerModule(),
-				new MastModule(),
-				new BridgeModule(),
-				new TunnelModule(),
-				new SurfaceAreaModule(),
-				new InvisibleModule(),
-				new IndoorModule()
-		);
+		List<String> excludedModules = config.getList("excludeWorldModule")
+			.stream().map(m -> m.toString()).toList();
 
+		return Stream.of((WorldModule)
+			new RoadModule(),
+			new RailwayModule(),
+			new AerowayModule(),
+			new BuildingModule(),
+			new ParkingModule(),
+			new TreeModule(),
+			new StreetFurnitureModule(),
+			new TrafficSignModule(),
+			new BicycleParkingModule(),
+			new WaterModule(),
+			new PoolModule(),
+			new GolfModule(),
+			new SportsModule(),
+			new CliffModule(),
+			new BarrierModule(),
+			new PowerModule(),
+			new MastModule(),
+			new BridgeModule(),
+			new TunnelModule(),
+			new SurfaceAreaModule(),
+			new InvisibleModule(),
+			new IndoorModule()
+		)
+		.filter(m -> !excludedModules.contains(m.getClass().getSimpleName()))
+		.toList();
 	}
 
 	private Function<LatLon, ? extends MapProjection> mapProjectionFactory = MetricMapProjection::new;
 
-	private Factory<? extends TerrainInterpolator> terrainEleInterpolatorFactory = ZeroInterpolator::new;
-
-	private Factory<? extends EleCalculator> eleCalculatorFactory = BridgeTunnelEleCalculator::new;
+	private @Nullable Factory<? extends TerrainInterpolator> terrainEleInterpolatorFactory = null;
+	private @Nullable Factory<? extends EleCalculator> eleCalculatorFactory = null;
 
 	/**
 	 * sets the factory that will make {@link MapProjection}
@@ -134,21 +144,20 @@ public class ConversionFacade {
 	}
 
 	/**
-	 * sets the factory that will make {@link EleCalculator}
-	 * instances during subsequent calls to
+	 * sets the factory that will make {@link EleCalculator} instances during subsequent calls to
 	 * {@link #createRepresentations(OSMData, MapMetadata, List, Configuration, List)}.
+	 * Can be set to null, in which case there will be an attempt to parse the configuration for this.
 	 */
-	public void setEleCalculatorFactory(Factory<? extends EleCalculator> eleCalculatorFactory) {
+	public void setEleCalculatorFactory(@Nullable Factory<? extends EleCalculator> eleCalculatorFactory) {
 		this.eleCalculatorFactory = eleCalculatorFactory;
 	}
 
 	/**
-	 * sets the factory that will make {@link TerrainInterpolator}
-	 * instances during subsequent calls to
+	 * sets the factory that will make {@link TerrainInterpolator} instances during subsequent calls to
 	 * {@link #createRepresentations(OSMData, MapMetadata, List, Configuration, List)}.
+	 *  Can be set to null, in which case there will be an attempt to parse the configuration for this.
 	 */
-	public void setTerrainEleInterpolatorFactory(
-			Factory<? extends TerrainInterpolator> enforcerFactory) {
+	public void setTerrainEleInterpolatorFactory(@Nullable Factory<? extends TerrainInterpolator> enforcerFactory) {
 		this.terrainEleInterpolatorFactory = enforcerFactory;
 	}
 
@@ -264,10 +273,11 @@ public class ConversionFacade {
 		updatePhase(Phase.REPRESENTATION);
 
 		if (worldModules == null) {
-			worldModules = createDefaultModuleList();
+			worldModules = createDefaultModuleList(config);
 		}
 
 		Materials.configureMaterials(config);
+		Models.configureModels(config);
 			//this will cause problems if multiple conversions are run
 			//at the same time, because global variables are being modified
 
@@ -278,11 +288,11 @@ public class ConversionFacade {
 		/* determine elevations */
 		updatePhase(Phase.ELEVATION);
 
-		String srtmDir = config.getString("srtmDir", null);
+		File srtmDir = ConfigUtil.resolveFileConfigProperty(config, config.getString("srtmDir", null));
 		TerrainElevationData eleData = null;
 
 		if (srtmDir != null) {
-			eleData = new SRTMData(new File(srtmDir), mapProjection);
+			eleData = new SRTMData(srtmDir, mapProjection);
 		}
 
 		/* create terrain and attach connectors */
@@ -360,7 +370,7 @@ public class ConversionFacade {
 
 		for (boolean requirePreferredHeight : asList(true, false)) {
 
-			Predicate<FaceXYZ> matchesPreferredHeight = (FaceXYZ f) -> {
+			Predicate<FlatSimplePolygonShapeXYZ> matchesPreferredHeight = f -> {
 				if (!requirePreferredHeight) {
 					return true;
 				} else {
@@ -370,12 +380,12 @@ public class ConversionFacade {
 				}
 			};
 
-			Optional<FaceXYZ> closestFace = surface.getFaces().stream()
+			Optional<? extends FlatSimplePolygonShapeXYZ> closestFace = surface.getFaces().stream()
 					.filter(matchesPreferredHeight)
 					.filter(f -> connector.isAcceptableNormal.test(f.getNormal()))
 					.min(comparingDouble(f -> connector.changeXZ ? f.distanceTo(posAtEle) : f.distanceToXZ(posAtEle)));
 
-			if (!closestFace.isPresent()) continue; // try again without enforcing the preferred height
+			if (closestFace.isEmpty()) continue; // try again without enforcing the preferred height
 
 			VectorXYZ closestPoint = null;
 
@@ -399,17 +409,18 @@ public class ConversionFacade {
 	}
 
 	/**
-	 * uses OSM data and an terrain elevation data (usually from an external
+	 * uses OSM data and a terrain elevation data (usually from an external
 	 * source) to calculate elevations for all {@link EleConnector}s of the
 	 * {@link WorldObject}s
 	 */
 	private void calculateElevations(MapData mapData,
 			TerrainElevationData eleData, Configuration config) {
 
-		final TerrainInterpolator interpolator =
-				(eleData != null)
-				? terrainEleInterpolatorFactory.get()
-				: new ZeroInterpolator();
+		TerrainInterpolator interpolator = createTerrainInterpolator(config);
+
+		if (eleData == null) {
+			interpolator = new ZeroInterpolator();
+		}
 
 		/* provide known elevations from eleData to the interpolator */
 
@@ -418,27 +429,65 @@ public class ConversionFacade {
 			Collection<VectorXYZ> sites = emptyList();
 
 			try {
-				sites = eleData.getSites(mapData);
+				sites = eleData.getSites(mapData.getDataBoundary().pad(10));
 			} catch (IOException e) {
-				e.printStackTrace();
+				ConversionLog.error("Could not read elevation data: " + e.getMessage(), e);
 			}
 
-			interpolator.setKnownSites(sites);
+			if (!sites.isEmpty()) {
+				interpolator.setKnownSites(sites);
+			} else {
+				ConversionLog.error("No sites with known elevation available");
+				interpolator = new ZeroInterpolator();
+			}
 
 		}
 
 		/* interpolate terrain elevation for each connector */
 
+		final TerrainInterpolator finalInterpolator = interpolator;
+
 		FaultTolerantIterationUtil.forEach(mapData.getWorldObjects(), (WorldObject worldObject) -> {
 			for (EleConnector conn : worldObject.getEleConnectors()) {
-				conn.setPosXYZ(interpolator.interpolateEle(conn.pos));
+				conn.setPosXYZ(finalInterpolator.interpolateEle(conn.pos));
 			}
 		});
 
 		/* refine terrain-based elevation with information from map data */
 
-		EleCalculator eleCalculator = eleCalculatorFactory.get();
+		EleCalculator eleCalculator = createEleCalculator(config);
 		eleCalculator.calculateElevations(mapData);
+
+	}
+
+	private EleCalculator createEleCalculator(Configuration config) {
+
+		if (eleCalculatorFactory != null) {
+			return eleCalculatorFactory.get();
+		} else {
+			return switch (config.getString("eleCalculator", "")) {
+				case "NoOpEleCalculator" -> new NoOpEleCalculator();
+				case "EleTagEleCalculator" -> new EleTagEleCalculator();
+				case "ConstraintEleCalculator" -> new ConstraintEleCalculator(new SimpleEleConstraintEnforcer());
+				default -> new BridgeTunnelEleCalculator();
+			};
+		}
+
+	}
+
+	private TerrainInterpolator createTerrainInterpolator(Configuration config) {
+
+		if (terrainEleInterpolatorFactory != null) {
+			return terrainEleInterpolatorFactory.get();
+		} else {
+			return switch (config.getString("terrainInterpolator", "")) {
+				case "LinearInterpolator" -> new LinearInterpolator();
+				case "LeastSquaresInterpolator" -> new LeastSquaresInterpolator();
+				case "NaturalNeighborInterpolator" -> new NaturalNeighborInterpolator();
+				case "InverseDistanceWeightingInterpolator" -> new InverseDistanceWeightingInterpolator();
+				default -> new ZeroInterpolator();
+			};
+		}
 
 	}
 

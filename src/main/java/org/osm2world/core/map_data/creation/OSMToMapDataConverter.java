@@ -24,7 +24,6 @@ import org.osm2world.core.osm.ruleset.HardcodedRuleset;
 import org.osm2world.core.osm.ruleset.Ruleset;
 
 import de.topobyte.osm4j.core.model.iface.*;
-import de.topobyte.osm4j.core.model.impl.Tag;
 import de.topobyte.osm4j.core.resolve.EntityNotFoundException;
 import gnu.trove.map.TLongObjectMap;
 import gnu.trove.map.hash.TLongObjectHashMap;
@@ -80,7 +79,7 @@ public class OSMToMapDataConverter {
 
 		/* create MapNode for each OSM node */
 
-		final TLongObjectMap<MapNode> nodeIdMap = new TLongObjectHashMap<MapNode>();
+		final TLongObjectMap<MapNode> nodeIdMap = new TLongObjectHashMap<>();
 
 		for (OsmNode node : osmData.getNodes()) {
 			VectorXZ nodePos = mapProjection.toXZ(node.getLatitude(), node.getLongitude());
@@ -95,12 +94,11 @@ public class OSMToMapDataConverter {
 
 		/* ... based on multipolygons */
 
-		forEach(osmData.getRelations(), (OsmRelation relation ) -> {
+		forEach(osmData.getRelations(), (OsmRelation relation) -> {
 
-			Map<String, String> tags = getTagsAsMap(relation);
+			TagSet tags = TagSet.of(getTagsAsMap(relation));
 
-			String value = tags.get(MULTIPOLYON_TAG.getKey());
-			if (!MULTIPOLYON_TAG.getValue().equals(value)) {
+			if (!tags.contains(MULTIPOLYON_TAG)) {
 				return;
 			}
 
@@ -275,10 +273,10 @@ public class OSMToMapDataConverter {
 
 		if (entity.getNumberOfTags() == 0) return TagSet.of();
 
-		org.osm2world.core.map_data.data.Tag[] tags =
-				new org.osm2world.core.map_data.data.Tag[entity.getNumberOfTags()];
+		Tag[] tags =
+				new Tag[entity.getNumberOfTags()];
 		for (int i = 0; i < entity.getNumberOfTags(); i++) {
-			tags[i] = new org.osm2world.core.map_data.data.Tag(entity.getTag(i).getKey(), entity.getTag(i).getValue());
+			tags[i] = new Tag(entity.getTag(i).getKey(), entity.getTag(i).getValue());
 		}
 		return TagSet.of(tags);
 
@@ -330,37 +328,37 @@ public class OSMToMapDataConverter {
 	 * to both, if it exists. It calls the appropriate
 	 * subtype-specific addOverlapBetween method
 	 */
-	private static void addOverlapBetween(MapElement e1, MapElement e2) {
+	static void addOverlapBetween(MapElement e1, MapElement e2) {
 
-		if (e1 instanceof MapWaySegment
-				&& e2 instanceof MapWaySegment) {
+		if (e1 instanceof MapWaySegment s1
+				&& e2 instanceof MapWaySegment s2) {
 
-			addOverlapBetween((MapWaySegment) e1, (MapWaySegment) e2);
+			addOverlapBetween(s1, s2);
 
-		} else if (e1 instanceof MapWaySegment
-				&& e2 instanceof MapArea) {
+		} else if (e1 instanceof MapWaySegment s
+				&& e2 instanceof MapArea area) {
 
-			addOverlapBetween((MapWaySegment) e1, (MapArea) e2);
+			addOverlapBetween(s, area);
 
-		} else if (e1 instanceof MapArea
-				&& e2 instanceof MapWaySegment) {
+		} else if (e1 instanceof MapArea area
+				&& e2 instanceof MapWaySegment s) {
 
-			addOverlapBetween((MapWaySegment) e2, (MapArea) e1);
+			addOverlapBetween(s, area);
 
-		} else if (e1 instanceof MapArea
-				&& e2 instanceof MapArea) {
+		} else if (e1 instanceof MapArea area1
+				&& e2 instanceof MapArea area2) {
 
-			addOverlapBetween((MapArea) e1, (MapArea) e2);
+			addOverlapBetween(area1, area2);
 
-		} else if (e1 instanceof MapNode
-				&& e2 instanceof MapArea) {
+		} else if (e1 instanceof MapNode node
+				&& e2 instanceof MapArea area) {
 
-			addOverlapBetween((MapNode) e1, (MapArea) e2);
+			addOverlapBetween(node, area);
 
-		} else if (e1 instanceof MapArea
-				&& e2 instanceof MapNode) {
+		} else if (e1 instanceof MapArea area
+				&& e2 instanceof MapNode node) {
 
-			addOverlapBetween((MapNode) e2, (MapArea) e1);
+			addOverlapBetween(node, area);
 
 		}
 

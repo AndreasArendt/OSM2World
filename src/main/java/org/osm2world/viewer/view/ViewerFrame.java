@@ -96,6 +96,7 @@ public class ViewerFrame extends JFrame {
 			subMenu.add(new ExportObjAction(this, data, messageManager, renderOptions));
 			subMenu.add(new ExportObjDirAction(this, data, messageManager, renderOptions));
 			subMenu.add(new ExportPOVRayAction(this, data, messageManager, renderOptions));
+			subMenu.add(new ExportPngAction(this, data, messageManager, renderOptions));
 			subMenu.add(new ExportScreenshotAction(this, data, messageManager, renderOptions));
 			subMenu.add(new StatisticsAction(this, data));
 			subMenu.add(new ExitAction());
@@ -135,7 +136,7 @@ public class ViewerFrame extends JFrame {
 			initAndAddDebugView(subMenu, -1, false,
 					new Map2dTreeDebugView());
 			initAndAddDebugView(subMenu, VK_B, false,
-					new TerrainBoundaryDebugView());
+					new GroundFootprintDebugView());
 			initAndAddDebugView(subMenu, -1, false,
 					new WorldObjectNormalsDebugView());
 			initAndAddDebugView(subMenu, -1, false,

@@ -14,6 +14,7 @@ import java.awt.image.ColorConvertOp;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
@@ -29,8 +30,6 @@ import org.osm2world.core.math.VectorXZ;
 import org.osm2world.core.target.common.texcoord.TexCoordFunction;
 import org.osm2world.core.util.Resolution;
 import org.osm2world.core.util.color.LColor;
-
-import jakarta.xml.bind.DatatypeConverter;
 
 /**
  * a texture with metadata necessary for calculating texture coordinates.
@@ -61,20 +60,7 @@ public abstract class TextureData {
 
 	}
 
-	/** width of a single tile of the texture in meters, greater than 0 */
-	public final double width;
-
-	/** height of a single tile of the texture in meters, greater than 0 */
-	public final double height;
-
-	/**
-	 * for textures that contain distinct, repeating objects (e.g. tiles), this describes the width of one such object.
-	 * Some calculations for texture coords will use this to fit an integer number of such objects onto a surface.
-	 */
-	public final @Nullable Double widthPerEntity;
-
-	/** see {@link #widthPerEntity} */
-	public final @Nullable Double heightPerEntity;
+	public final TextureDataDimensions dimensions;
 
 	/** wrap style of the texture */
 	public final Wrap wrap;
@@ -91,26 +77,15 @@ public abstract class TextureData {
 	/** cached result of {@link #getBufferedImage(Resolution)} */
 	private final Map<Resolution, BufferedImage> bufferedImageByResolution = new HashMap<>();
 
-	protected TextureData(double width, double height, @Nullable Double widthPerEntity, @Nullable Double heightPerEntity,
+	protected TextureData(TextureDataDimensions dimensions,
 			Wrap wrap, @Nullable  Function<TextureDataDimensions, TexCoordFunction> texCoordFunction) {
-
-		if (width <= 0 || height <= 0) {
-			throw new IllegalArgumentException("Illegal texture dimensions. Width: " + width + ", height: " + height);
-		} else if (widthPerEntity != null && widthPerEntity <= 0 || heightPerEntity != null && heightPerEntity <= 0) {
-			throw new IllegalArgumentException("Illegal per-entity texture dimensions.");
-		}
-
-		this.width = width;
-		this.height = height;
-		this.widthPerEntity = widthPerEntity;
-		this.heightPerEntity = heightPerEntity;
+		this.dimensions = dimensions;
 		this.wrap = wrap;
 		this.coordFunction = texCoordFunction == null ? null : texCoordFunction.apply(this.dimensions());
-
 	}
 
 	public TextureDataDimensions dimensions() {
-		return new TextureDataDimensions(width, height, widthPerEntity, heightPerEntity);
+		return dimensions;
 	}
 
 	/**
@@ -149,7 +124,7 @@ public abstract class TextureData {
 		RasterImageFormat format = getRasterImageFormat();
 		try (var stream = new ByteArrayOutputStream()) {
 		    writeRasterImageToStream(stream);
-		    return "data:" + format.mimeType() + ";base64," + DatatypeConverter.printBase64Binary(stream.toByteArray());
+		    return "data:" + format.mimeType() + ";base64," + Base64.getEncoder().encodeToString(stream.toByteArray());
 		} catch (IOException e) {
 		    throw new Error(e);
 		}
@@ -199,6 +174,11 @@ public abstract class TextureData {
 	/** variant of {@link #writeRasterImageToStream(OutputStream, float)} with default compression quality */
 	public void writeRasterImageToStream(OutputStream stream) throws IOException {
 		writeRasterImageToStream(stream, 0.75f);
+	}
+
+	/** returns this texture's aspect ratio (same definition as {@link Resolution#getAspectRatio()}) */
+	public float getAspectRatio() {
+		return Resolution.of(getBufferedImage()).getAspectRatio();
 	}
 
 	/** averages the color values (in linear color space) */
